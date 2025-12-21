@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Archivos</h2>
+
+<form method="post">
+    Número: <input type="number" name="numero" required><br><br>
+    Nombre: <input type="text" name="nombre"><br><br>
+
+    <button name="accion" value="agregar">Agregar</button>
+    <button name="accion" value="modificar">Modificar</button>
+    <button name="accion" value="eliminar">Eliminar</button>
+</form>
+
+<hr>
+
+<h3>Archivos registrados</h3>
+<table border="1">
+    <tr>
+        <th>Número</th>
+        <th>Nombre</th>
+        <th>Caja</th>
+    </tr>
+    {% for a in archivos %}
+    <tr>
+        <td>{{ a[0] }}</td>
+        <td>{{ a[1] }}</td>
+        <td>{{ a[2] }} - {{ a[3] }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}

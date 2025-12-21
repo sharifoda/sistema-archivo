@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    {% if not session.get("usuario") %}
+    <a href="{{ url_for('register') }}">Registro</a>
+{% endif %}
+</head>
+<body>
+
+{% if not session.get("usuario") %}
+    <a href="{{ url_for('register') }}">Registro</a>
+{% endif %}
+
+<form method="POST">
+    <input type="text" name="usuario" placeholder="Usuario" required><br><br>
+    <input type="password" name="password" placeholder="Contraseña" required><br><br>
+    <button type="submit">Registrar</button>
+</form>
+
+<br>
+{% if not session.get("usuario") %}
+    <a href="{{ url_for('login') }}">Login</a>
+{% endif %}
+
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Sistema de Archivos{% endblock %}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+        }
+        nav a {
+            margin-right: 15px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h2>Sistema de Archivos</h2>
+
+    {% if session.get("usuario") %}
+        <div>
+            {{ session["usuario"] }} |
+            <a href="{{ url_for('logout') }}">Cerrar sesión</a>
+        </div>
+    {% endif %}
+</header>
+
+<hr>
+
+<nav>
+    {% if session.get("usuario") %}
+        <a href="{{ url_for('inicio') }}">Inicio</a>
+        <a href="{{ url_for('cajas') }}">Cajas</a>
+        <a href="{{ url_for('archivos') }}">Archivos</a>
+    {% else %}
+        <a href="{{ url_for('login') }}">Login</a>
+        <a href="{{ url_for('register') }}">Registro</a>
+    {% endif %}
+</nav>
+
+<hr>
+
+{% block content %}
+{% endblock %}
+
+</body>
+</html>

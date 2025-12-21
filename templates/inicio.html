@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Inicio{% endblock %}
+
+{% block content %}
+
+<h1>👋 ¡Bienvenido!</h1>
+
+<p>
+    Has iniciado sesión correctamente en el sistema de gestión documental.
+</p>
+
+<div style="margin-top: 20px;">
+    <p>Desde aquí puedes:</p>
+    <ul>
+        <li>📁 Administrar archivos</li>
+        <li>📦 Gestionar cajas por rangos</li>
+        <li>🔍 Mantener el control y organización de la información</li>
+    </ul>
+</div>
+
+<div style="margin-top: 30px;">
+    <a href="{{ url_for('archivos') }}">➡ Ir a Archivos</a><br><br>
+    <a href="{{ url_for('cajas') }}">➡ Ir a Cajas</a>
+</div>
+
+{% endblock %}

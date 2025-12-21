@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Crear Caja</h2>
+
+<form method="post">
+    Rango mínimo: <input type="number" name="rango_min" required><br><br>
+    Rango máximo: <input type="number" name="rango_max" required><br><br>
+    <button type="submit">Crear caja</button>
+</form>
+{% endblock %}

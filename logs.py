@@ -1,0 +1,23 @@
+from db import get_db
+
+def registrar_log(usuario_id, accion, ip=None):
+    """
+    Guarda un log en la tabla logs.
+    usuario_id: int (id del usuario en la tabla usuarios)
+    accion: str (ej: 'LOGIN', 'CREAR_CAJA', etc.)
+    ip: str (opcional)
+    """
+    if not usuario_id:
+        return  # si por alguna razón no hay usuario_id, no registramos
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        "INSERT INTO logs (usuario_id, accion, ip) VALUES (%s, %s, %s)",
+        (usuario_id, accion, ip)
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()

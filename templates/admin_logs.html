@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Logs del sistema{% endblock %}
+
+{% block content %}
+<h2>📜 Auditoría del sistema (últimos 200)</h2>
+
+<table border="1" cellpadding="8" cellspacing="0">
+  <tr>
+    <th>Usuario</th>
+    <th>Acción</th>
+    <th>Fecha</th>
+    <th>IP</th>
+  </tr>
+
+  {% for r in registros %}
+  <tr>
+    <td>{{ r[0] }}</td>
+    <td>{{ r[1] }}</td>
+    <td>{{ r[2] }}</td>
+    <td>{{ r[3] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

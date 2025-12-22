@@ -1,34 +1,80 @@
-import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
+from db import get_db
+import psycopg2
 
-DB = "archivo.db"
 
-def crear_usuario(usuario, password):
-    conn = sqlite3.connect(DB)
-    cursor = conn.cursor()
+def crear_usuario(usuario, password, rol="cliente"):
+    """
+    Crea un usuario nuevo con contraseña hasheada.
+    rol: 'admin' o 'cliente'
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
     hash_pw = generate_password_hash(password)
 
-    cursor.execute(
-        "INSERT INTO usuarios (usuario, password) VALUES (?, ?)",
-        (usuario, hash_pw)
-    )
-
-    conn.commit()
-    conn.close()
+    try:
+        cur.execute(
+            "INSERT INTO usuarios (usuario, password, rol) VALUES (%s, %s, %s)",
+            (usuario, hash_pw, rol)
+        )
+        conn.commit()
+        return True
+    except psycopg2.errors.UniqueViolation:
+        # usuario ya existe
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()
 
 
 def verificar_usuario(usuario, password):
-    conn = sqlite3.connect(DB)
-    cursor = conn.cursor()
+    """
+    Verifica credenciales. Devuelve:
+      - (id, rol) si son válidas
+      - None si son inválidas
+    """
+    conn = get_db()
+    cur = conn.cursor()
 
-    cursor.execute(
-        "SELECT password FROM usuarios WHERE usuario = ?",
+    cur.execute(
+        "SELECT id, password, rol FROM usuarios WHERE usuario = %s AND activo = TRUE",
         (usuario,)
     )
 
-    dato = cursor.fetchone()
+    dato = cur.fetchone()
+
+    cur.close()
     conn.close()
 
-    if dato and check_password_hash(dato[0], password):
-        return True
-    return False
+    if not dato:
+        return None
+
+    user_id, hash_pw, rol = dato
+
+    if check_password_hash(hash_pw, password):
+        return (user_id, rol)
+
+    return None
+
+
+def obtener_usuario_y_rol(usuario):
+    """
+    (Opcional) Si lo sigues usando en otras partes.
+    Devuelve (id, rol) o None.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT id, rol FROM usuarios WHERE usuario = %s AND activo = TRUE",
+        (usuario,)
+    )
+
+    dato = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return dato

@@ -38,6 +38,11 @@
         <a href="{{ url_for('inicio') }}">Inicio</a>
         <a href="{{ url_for('cajas') }}">Cajas</a>
         <a href="{{ url_for('archivos') }}">Archivos</a>
+
+        {% if session.get("rol") == "admin" %}
+            <a href="{{ url_for('admin_logs') }}">Logs</a>
+        {% endif %}
+
     {% else %}
         <a href="{{ url_for('login') }}">Login</a>
         <a href="{{ url_for('register') }}">Registro</a>

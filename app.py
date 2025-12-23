@@ -1,7 +1,14 @@
 print(">>> APP.PY CORRECTO CARGADO <<<")
 
 from flask import Flask, render_template, request, redirect, url_for, session, send_file
-from cajas import crear_caja
+from cajas import (
+    crear_caja,
+    eliminar_caja,
+    modificar_caja,
+    asegurar_caja_sin_asignar,
+    reubicar_archivos_de_caja,
+    reubicar_archivos_pendientes_por_nueva_caja
+)
 from archivos import agregar_archivo, modificar_archivo, eliminar_archivo
 from auth import crear_usuario, verificar_usuario, obtener_usuario_y_rol
 from logs import registrar_log
@@ -10,6 +17,7 @@ from io import BytesIO
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font
+from flask import flash
 
 app = Flask(__name__)
 app.secret_key = "clave_super_secreta"
@@ -90,13 +98,82 @@ def cajas():
     if not login_requerido():
         return redirect(url_for("login"))
 
+    # Asegurar que siempre exista la Caja 0
+    asegurar_caja_sin_asignar()
+
     if request.method == "POST":
+        accion = request.form.get("accion")
+
+        # ======================
+        # ELIMINAR CAJA
+        # ======================
+        if accion == "eliminar":
+            caja_id = int(request.form["caja_id"])
+
+            eliminar_caja(caja_id)
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"ELIMINAR_CAJA caja_id={caja_id}",
+                request.remote_addr
+            )
+
+            return redirect(url_for("cajas"))
+
+        # ======================
+        # MODIFICAR CAJA
+        # ======================
+        if accion == "modificar":
+            caja_id = int(request.form["caja_id"])
+            nuevo_min = int(request.form["rango_min"])
+            nuevo_max = int(request.form["rango_max"])
+
+            modificar_caja(caja_id, nuevo_min, nuevo_max)
+
+            # 1) Sacar archivos que ya no caben
+            movidos_fuera = reubicar_archivos_de_caja(caja_id)
+
+            # 2) Meter archivos pendientes que ahora sí caben
+            movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(caja_id)
+
+            total_movidos = movidos_fuera + movidos_dentro
+
+            if total_movidos > 0:
+                flash(
+                    f"Se reasignaron automáticamente {total_movidos} archivo(s) según el nuevo rango.",
+                    "success"
+                )
+            else:
+                flash(
+                    "El rango se actualizó. No fue necesario reasignar archivos.",
+                    "info"
+                )
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"MODIFICAR_CAJA caja_id={caja_id} rango={nuevo_min}-{nuevo_max} reasignados={total_movidos}",
+                request.remote_addr
+            )
+
+            return redirect(url_for("cajas"))
+
+
+
+        # ======================
+        # CREAR CAJA
+        # ======================
         rmin = int(request.form["rango_min"])
         rmax = int(request.form["rango_max"])
 
-        crear_caja(rmin, rmax, creado_por=session.get("usuario_id"))
+        nueva_caja_id = crear_caja(
+            rmin,
+            rmax,
+            creado_por=session.get("usuario_id")
+        )
 
-        # LOG: CREAR_CAJA
+        # Reubicar archivos pendientes (Caja 0) si encajan en la nueva caja
+        reubicar_archivos_pendientes_por_nueva_caja(nueva_caja_id)
+
         registrar_log(
             session.get("usuario_id"),
             f"CREAR_CAJA rango={rmin}-{rmax}",
@@ -105,7 +182,53 @@ def cajas():
 
         return redirect(url_for("cajas"))
 
-    return render_template("cajas.html")
+    # ======================
+    # LISTADO DE CAJAS
+    # ======================
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        WITH ranked AS (
+            SELECT
+                id,
+                rango_min,
+                rango_max,
+                ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE id <> 0
+        )
+        SELECT
+            c.id AS caja_id,
+            COUNT(a.id) AS total_archivos,
+            c.rango_min,
+            c.rango_max,
+            CASE
+                WHEN c.id = 0 THEN 0
+                ELSE r.caja_visible
+            END AS caja_visible
+        FROM cajas c
+        LEFT JOIN archivos a ON a.caja_id = c.id
+        LEFT JOIN ranked r ON r.id = c.id
+        GROUP BY c.id, c.rango_min, c.rango_max, r.caja_visible
+        ORDER BY
+            CASE WHEN c.id = 0 THEN 1 ELSE 0 END,
+            caja_visible
+    """)
+
+    cajas_data = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    # Ocultar Caja 0 si está vacía
+    cajas_filtradas = []
+    for c in cajas_data:
+        if c[0] == 0 and c[1] == 0:
+            continue
+        cajas_filtradas.append(c)
+
+    return render_template("cajas.html", cajas=cajas_filtradas)
+
 
 
 # ---------------- ARCHIVOS ----------------
@@ -136,19 +259,34 @@ def archivos():
     conn = get_db()
     cur = conn.cursor()
 
+    # Caja visible: 1..N según rango_min (y caja 0 para "pendientes")
     cur.execute("""
-        SELECT a.numero, a.nombre, c.rango_min, c.rango_max
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE id <> 0
+        )
+        SELECT
+            CASE
+                WHEN c.id = 0 THEN 0
+                ELSE r.caja_visible
+            END AS caja,
+            a.numero AS documento,
+            a.nombre AS nombre
         FROM archivos a
         JOIN cajas c ON a.caja_id = c.id
-        ORDER BY a.numero
+        LEFT JOIN ranked r ON r.id = c.id
+        ORDER BY caja, a.numero
     """)
 
     datos = cur.fetchall()
-
     cur.close()
     conn.close()
 
     return render_template("archivos.html", archivos=datos)
+
 
 
 # ---------------- ADMIN: LOGS ----------------

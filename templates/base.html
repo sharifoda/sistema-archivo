@@ -16,6 +16,19 @@
             justify-content: space-between;
             align-items: center;
         }
+        .flash {
+            list-style: none;
+            padding: 0;
+            margin: 15px 0;
+        }
+        .flash li {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+        }
+        .flash-success { background-color: #d4edda; }
+        .flash-info { background-color: #d1ecf1; }
+        .flash-error { background-color: #f8d7da; }
     </style>
 </head>
 <body>
@@ -32,6 +45,19 @@
 </header>
 
 <hr>
+
+<!-- ✅ Mensajes Flash -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <ul class="flash">
+      {% for category, message in messages %}
+        <li class="flash-{{ category if category in ['success','info','error'] else 'info' }}">
+          {{ message }}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endwith %}
 
 <nav>
     {% if session.get("usuario") %}

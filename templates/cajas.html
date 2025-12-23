@@ -1,10 +1,80 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Crear Caja</h2>
+
+<h2>📦 Cajas</h2>
 
 <form method="post">
-    Rango mínimo: <input type="number" name="rango_min" required><br><br>
-    Rango máximo: <input type="number" name="rango_max" required><br><br>
-    <button type="submit">Crear caja</button>
+    <label>Rango mínimo</label><br>
+    <input type="number" name="rango_min" required><br><br>
+
+    <label>Rango máximo</label><br>
+    <input type="number" name="rango_max" required><br><br>
+
+    <button type="submit">Agregar caja</button>
 </form>
+
+<hr>
+
+<h3>📋 Cajas registradas</h3>
+
+<table border="1" cellpadding="8" cellspacing="0">
+    <tr>
+        <th>Caja</th>
+        <th>Total</th>
+        <th>Rango</th>
+        <th>Modificar rango</th>
+        <th>Acción</th>
+    </tr>
+
+    {% for c in cajas %}
+    <tr>
+        <td>
+            {% if c[4] == 0 %}
+                <strong>0</strong> (Pendiente)
+            {% else %}
+                {{ c[4] }}
+            {% endif %}
+        </td>
+        <td>{{ c[1] }}</td>
+        <td>
+            {% if c[0] == 0 %}
+                Sin caja (pendientes)
+            {% else %}
+                {{ c[2] }} - {{ c[3] }}
+            {% endif %}
+        </td>
+
+        <td>
+            {% if c[0] == 0 %}
+                <em>No aplica</em>
+            {% else %}
+                <form method="post" style="display:flex; gap:6px; align-items:center;">
+                    <input type="hidden" name="accion" value="modificar">
+                    <input type="hidden" name="caja_id" value="{{ c[0] }}">
+                    <input type="number" name="rango_min" value="{{ c[2] }}" style="width:140px;" required>
+                    <span>-</span>
+                    <input type="number" name="rango_max" value="{{ c[3] }}" style="width:140px;" required>
+                    <button type="submit">Modificar</button>
+                </form>
+            {% endif %}
+        </td>
+
+        <td>
+            {% if c[0] == 0 %}
+                <em>No se elimina</em>
+            {% else %}
+                <form method="post" style="display:inline;">
+                    <input type="hidden" name="accion" value="eliminar">
+                    <input type="hidden" name="caja_id" value="{{ c[0] }}">
+                    <button type="submit"
+                        onclick="return confirm('¿Seguro que deseas eliminar la caja {{ c[4] }}? Los archivos se reubicarán automáticamente.');">
+                        Eliminar
+                    </button>
+                </form>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+
 {% endblock %}

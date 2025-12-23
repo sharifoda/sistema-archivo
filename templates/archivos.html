@@ -1,15 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Archivos</h2>
+
+<h2>📄 Archivos</h2>
 
 <p>
   <a href="{{ url_for('export_excel') }}">⬇️ Descargar reporte Excel (Cajas + Archivos)</a>
 </p>
 
-
 <form method="post">
-    Número: <input type="number" name="numero" required><br><br>
-    Nombre: <input type="text" name="nombre"><br><br>
+    <label>Documento (número)</label><br>
+    <input type="number" name="numero" required><br><br>
+
+    <label>Nombre</label><br>
+    <input type="text" name="nombre"><br><br>
 
     <button name="accion" value="agregar">Agregar</button>
     <button name="accion" value="modificar">Modificar</button>
@@ -18,19 +21,28 @@
 
 <hr>
 
-<h3>Archivos registrados</h3>
-<table border="1">
+<h3>📂 Archivos registrados</h3>
+
+<table border="1" cellpadding="8" cellspacing="0">
     <tr>
-        <th>Número</th>
-        <th>Nombre</th>
         <th>Caja</th>
+        <th>Documento</th>
+        <th>Nombre</th>
     </tr>
+
     {% for a in archivos %}
     <tr>
-        <td>{{ a[0] }}</td>
+        <td>
+            {% if a[0] == 0 %}
+                <strong>0</strong> (Pendiente)
+            {% else %}
+                {{ a[0] }}
+            {% endif %}
+        </td>
         <td>{{ a[1] }}</td>
-        <td>{{ a[2] }} - {{ a[3] }}</td>
+        <td>{{ a[2] }}</td>
     </tr>
     {% endfor %}
 </table>
+
 {% endblock %}

@@ -237,29 +237,105 @@ def archivos():
     if not login_requerido():
         return redirect(url_for("login"))
 
+    # =========================
+    # POST: agregar / modificar fila / eliminar fila
+    # =========================
     if request.method == "POST":
         accion = request.form["accion"]
-        numero = int(request.form["numero"])
-        nombre = request.form.get("nombre")
 
+        # ✅ AGREGAR (formulario de arriba)
         if accion == "agregar":
+            numero = int(request.form["numero"])
+            nombre = request.form.get("nombre", "").strip()
+
             agregar_archivo(numero, nombre, creado_por=session.get("usuario_id"))
-            registrar_log(session.get("usuario_id"), f"AGREGAR_ARCHIVO numero={numero}", request.remote_addr)
 
-        elif accion == "modificar":
-            modificar_archivo(numero, nombre)
-            registrar_log(session.get("usuario_id"), f"MODIFICAR_ARCHIVO numero={numero}", request.remote_addr)
+            # Log con info real
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("SELECT caja_id, nombre FROM archivos WHERE numero = %s", (numero,))
+            info = cur.fetchone()
+            caja_id = info[0] if info else 0
+            nombre_final = info[1] if info else nombre
+            cur.close()
+            conn.close()
 
-        elif accion == "eliminar":
+            registrar_log(
+                session.get("usuario_id"),
+                f"AGREGAR_ARCHIVO | caja_id={caja_id} | numero={numero} | nombre={nombre_final}",
+                request.remote_addr
+            )
+
+            return redirect(url_for("archivos"))
+
+       # ✅ MODIFICAR DESDE FILA (popup)
+        if accion == "modificar_fila":
+            numero_old = int(request.form["numero_old"])
+            numero_new = int(request.form["numero_new"])
+            nombre_new = request.form.get("nombre_new", "").strip()
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            cur.execute("SELECT caja_id FROM archivos WHERE numero = %s", (numero_old,))
+            antes = cur.fetchone()
+            caja_id = antes[0] if antes else 0
+
+            cur.execute("""
+                UPDATE archivos
+                SET numero = %s, nombre = %s
+                WHERE numero = %s
+            """, (numero_new, nombre_new, numero_old))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"MODIFICAR_ARCHIVO | caja_id={caja_id} | numero={numero_new} | nombre={nombre_new}",
+                request.remote_addr
+            )
+
+            return redirect(url_for("archivos"))
+
+
+        # ✅ ELIMINAR DESDE FILA
+        if accion == "eliminar_fila":
+            numero = int(request.form["numero"])
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            # guardar info antes de borrar
+            cur.execute("SELECT caja_id, nombre FROM archivos WHERE numero = %s", (numero,))
+            antes = cur.fetchone()
+            caja_id = antes[0] if antes else 0
+            nombre_final = antes[1] if antes else ""
+
+            cur.close()
+            conn.close()
+
             eliminar_archivo(numero)
-            registrar_log(session.get("usuario_id"), f"ELIMINAR_ARCHIVO numero={numero}", request.remote_addr)
 
+            registrar_log(
+                session.get("usuario_id"),
+                f"ELIMINAR_ARCHIVO | caja_id={caja_id} | numero={numero} | nombre={nombre_final}",
+                request.remote_addr
+            )
+
+            return redirect(url_for("archivos"))
+
+        # Si llega una acción desconocida:
         return redirect(url_for("archivos"))
 
+    # =========================
+    # GET: listado + búsqueda + últimos movimientos + modo edición
+    # =========================
     conn = get_db()
     cur = conn.cursor()
 
-    # Caja visible: 1..N según rango_min (y caja 0 para "pendientes")
+    # Listado normal (caja visible 1..N y caja 0)
     cur.execute("""
         WITH ranked AS (
             SELECT
@@ -269,10 +345,7 @@ def archivos():
             WHERE id <> 0
         )
         SELECT
-            CASE
-                WHEN c.id = 0 THEN 0
-                ELSE r.caja_visible
-            END AS caja,
+            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja,
             a.numero AS documento,
             a.nombre AS nombre
         FROM archivos a
@@ -280,12 +353,96 @@ def archivos():
         LEFT JOIN ranked r ON r.id = c.id
         ORDER BY caja, a.numero
     """)
-
     datos = cur.fetchall()
+
+    # Buscador
+    resultado = None
+    buscar = request.args.get("buscar", "").strip()
+    if buscar:
+        try:
+            doc = int(buscar)
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT
+                        id,
+                        ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                    FROM cajas
+                    WHERE id <> 0
+                )
+                SELECT
+                    CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja,
+                    a.numero AS documento,
+                    a.nombre AS nombre
+                FROM archivos a
+                JOIN cajas c ON a.caja_id = c.id
+                LEFT JOIN ranked r ON r.id = c.id
+                WHERE a.numero = %s
+                LIMIT 1
+            """, (doc,))
+            resultado = cur.fetchone()
+        except ValueError:
+            resultado = ("error", buscar, None)
+
+    # Modo edición (qué documento está en edición)
+    edit_num = request.args.get("edit", "").strip()
+    edit_num = int(edit_num) if edit_num.isdigit() else None
+
+    # Últimos movimientos (10)
+    cur.execute("""
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE id <> 0
+        ),
+        base AS (
+            SELECT
+                l.fecha,
+                l.accion,
+                NULLIF(substring(l.accion from 'caja_id=([0-9]+)') , '')::int AS caja_id,
+                NULLIF(substring(l.accion from 'numero=([0-9]+)') , '')::bigint AS documento,
+                substring(l.accion from 'nombre=([^|]+)') AS nombre,
+                CASE
+                    WHEN l.accion LIKE 'AGREGAR_ARCHIVO%' THEN 'Registro'
+                    WHEN l.accion LIKE 'MODIFICAR_ARCHIVO%' THEN 'Modificación'
+                    WHEN l.accion LIKE 'ELIMINAR_ARCHIVO%' THEN 'Eliminación'
+                    ELSE 'Otro'
+                END AS tipo
+            FROM logs l
+            WHERE l.accion LIKE 'AGREGAR_ARCHIVO%'
+               OR l.accion LIKE 'MODIFICAR_ARCHIVO%'
+               OR l.accion LIKE 'ELIMINAR_ARCHIVO%'
+            ORDER BY l.fecha DESC
+            LIMIT 10
+        )
+        SELECT
+            ROW_NUMBER() OVER (ORDER BY b.fecha DESC) AS movimiento,
+            CASE
+                WHEN COALESCE(b.caja_id, a.caja_id, 0) = 0 THEN 0
+                ELSE r.caja_visible
+            END AS caja,
+            COALESCE(b.documento, a.numero) AS documento,
+            COALESCE(b.nombre, a.nombre, '') AS nombre,
+            b.tipo
+        FROM base b
+        LEFT JOIN archivos a ON a.numero = b.documento
+        LEFT JOIN ranked r ON r.id = COALESCE(b.caja_id, a.caja_id)
+        ORDER BY movimiento
+    """)
+    movimientos = cur.fetchall()
+
     cur.close()
     conn.close()
 
-    return render_template("archivos.html", archivos=datos)
+    return render_template(
+        "archivos.html",
+        archivos=datos,
+        resultado=resultado,
+        movimientos=movimientos,
+        edit_num=edit_num
+    )
+
 
 
 

@@ -7,40 +7,245 @@
   <a href="{{ url_for('export_excel') }}">⬇️ Descargar reporte Excel (Cajas + Archivos)</a>
 </p>
 
+<h3>🔎 Buscar documento</h3>
+<form method="get" action="{{ url_for('archivos') }}">
+    <input type="number" name="buscar" placeholder="Escribe el número de documento" required>
+    <button type="submit">Buscar</button>
+    {% if request.args.get("buscar") %}
+        <a href="{{ url_for('archivos') }}" style="margin-left:10px;">Limpiar</a>
+    {% endif %}
+</form>
+
+{% if resultado %}
+  <div style="margin-top:15px;">
+    {% if resultado[0] == "error" %}
+      <p style="color:#b00020;">⚠️ Debes ingresar un número válido. Escribiste: <strong>{{ resultado[1] }}</strong></p>
+    {% elif resultado is none %}
+      <p style="color:#b00020;">❌ No se encontró ningún archivo con ese documento.</p>
+    {% else %}
+      <h4>✅ Resultado</h4>
+      <table border="1" cellpadding="8" cellspacing="0">
+        <tr>
+          <th>Caja</th><th>Documento</th><th>Nombre</th><th>PDF</th>
+        </tr>
+        <tr>
+          <td>
+            {% if resultado[0] == 0 %}
+              <strong>0</strong> (Pendiente)
+            {% else %}
+              {{ resultado[0] }}
+            {% endif %}
+          </td>
+          <td>{{ resultado[1] }}</td>
+          <td>{{ resultado[2] }}</td>
+          <td><em>Sin PDF</em></td>
+        </tr>
+      </table>
+    {% endif %}
+  </div>
+{% endif %}
+
+<hr>
+
+<h3>🕒 Últimos movimientos (Archivos)</h3>
+{% if movimientos and movimientos|length > 0 %}
+<table border="1" cellpadding="8" cellspacing="0">
+    <tr>
+        <th>#</th>
+        <th>Caja</th>
+        <th>Documento</th>
+        <th>Nombre</th>
+        <th>Movimiento</th>
+    </tr>
+    {% for m in movimientos %}
+    <tr>
+        <td>{{ m[0] }}</td>
+        <td>
+            {% if m[1] == 0 %}
+              <strong>0</strong> (Pendiente)
+            {% else %}
+              {{ m[1] }}
+            {% endif %}
+        </td>
+        <td>{{ m[2] }}</td>
+        <td>{{ m[3] }}</td>
+        <td>{{ m[4] }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p style="color:#666;">Todavía no hay movimientos recientes.</p>
+{% endif %}
+
+<hr>
+
+<h3>➕ Registrar archivo</h3>
 <form method="post">
+    <input type="hidden" name="accion" value="agregar">
+
     <label>Documento (número)</label><br>
     <input type="number" name="numero" required><br><br>
 
     <label>Nombre</label><br>
-    <input type="text" name="nombre"><br><br>
+    <input type="text" name="nombre" required><br><br>
 
-    <button name="accion" value="agregar">Agregar</button>
-    <button name="accion" value="modificar">Modificar</button>
-    <button name="accion" value="eliminar">Eliminar</button>
+    <button type="submit">Agregar</button>
 </form>
 
 <hr>
 
 <h3>📂 Archivos registrados</h3>
 
+<!-- ====== ESTILOS DEL MODAL ====== -->
+<style>
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 999;
+  }
+  .modal {
+    width: min(520px, 92vw);
+    background: white;
+    border-radius: 12px;
+    padding: 18px 18px 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    display: none;
+  }
+  .modal h4 { margin: 0 0 10px; }
+  .modal .sub { color: #666; font-size: 13px; margin: 0 0 12px; }
+  .modal .row { margin-bottom: 10px; }
+  .modal label { display:block; font-size:14px; margin-bottom:6px; }
+  .modal input {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+  }
+  .modal .actions {
+    display:flex;
+    justify-content: space-between;
+    margin-top: 14px;
+    gap: 10px;
+  }
+  .modal .btn {
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #999;
+    background: #f7f7f7;
+    cursor: pointer;
+  }
+  .modal .btn-primary {
+    border: 1px solid #1f6feb;
+    background: #1f6feb;
+    color: white;
+  }
+</style>
+
+<!-- ====== MODAL ====== -->
+<div class="modal-overlay" id="modalOverlay"></div>
+
+<div class="modal" id="modalEditar">
+  <h4>✏️ Modificar archivo</h4>
+  <p class="sub" id="modalInfo"></p>
+
+  <form method="post" id="form_modificar">
+    <input type="hidden" name="accion" value="modificar_fila">
+    <input type="hidden" name="numero_old" id="numero_old">
+
+    <div class="row">
+      <label for="numero_new">Documento (nuevo)</label>
+      <input type="number" name="numero_new" id="numero_new" required>
+    </div>
+
+    <div class="row">
+      <label for="nombre_new">Nombre (nuevo)</label>
+      <input type="text" name="nombre_new" id="nombre_new" required>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn" onclick="cerrarModal()">Cancelar</button>
+      <button type="submit" class="btn btn-primary">Modificar</button>
+    </div>
+  </form>
+</div>
+
+<!-- ====== JS ====== -->
+<script>
+  function abrirModal(btn) {
+    const numeroOld = btn.getAttribute("data-numero");
+    const nombreOld = btn.getAttribute("data-nombre") || "";
+
+    document.getElementById("numero_old").value = numeroOld;
+    document.getElementById("numero_new").value = numeroOld;
+    document.getElementById("nombre_new").value = nombreOld;
+
+    document.getElementById("modalInfo").innerText =
+      "Editando el documento: " + numeroOld;
+
+    document.getElementById("modalOverlay").style.display = "block";
+    document.getElementById("modalEditar").style.display = "block";
+
+    setTimeout(() => document.getElementById("numero_new").focus(), 50);
+  }
+
+  function cerrarModal() {
+    document.getElementById("modalOverlay").style.display = "none";
+    document.getElementById("modalEditar").style.display = "none";
+  }
+
+  document.addEventListener("click", function(e){
+    if (e.target === document.getElementById("modalOverlay")) cerrarModal();
+  });
+
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape") cerrarModal();
+  });
+</script>
+
 <table border="1" cellpadding="8" cellspacing="0">
     <tr>
         <th>Caja</th>
         <th>Documento</th>
         <th>Nombre</th>
+        <th>Acción</th>
     </tr>
 
     {% for a in archivos %}
     <tr>
         <td>
             {% if a[0] == 0 %}
-                <strong>0</strong> (Pendiente)
+              <strong>0</strong> (Pendiente)
             {% else %}
-                {{ a[0] }}
+              {{ a[0] }}
             {% endif %}
         </td>
         <td>{{ a[1] }}</td>
         <td>{{ a[2] }}</td>
+        <td>
+            <button type="button"
+                    data-numero="{{ a[1] }}"
+                    data-nombre="{{ a[2] }}"
+                    onclick="abrirModal(this)">
+                Modificar
+            </button>
+
+            <form method="post" style="display:inline;">
+                <input type="hidden" name="accion" value="eliminar_fila">
+                <input type="hidden" name="numero" value="{{ a[1] }}">
+                <button type="submit"
+                        onclick="return confirm('¿Seguro que deseas eliminar el documento {{ a[1] }}?');">
+                    Eliminar
+                </button>
+            </form>
+        </td>
     </tr>
     {% endfor %}
 </table>

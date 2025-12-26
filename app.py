@@ -118,10 +118,11 @@ def cajas():
                 request.remote_addr
             )
 
+            flash("Caja eliminada correctamente.", "success")
             return redirect(url_for("cajas"))
 
         # ======================
-        # MODIFICAR CAJA
+        # MODIFICAR CAJA (modal)
         # ======================
         if accion == "modificar":
             caja_id = int(request.form["caja_id"])
@@ -130,10 +131,7 @@ def cajas():
 
             modificar_caja(caja_id, nuevo_min, nuevo_max)
 
-            # 1) Sacar archivos que ya no caben
             movidos_fuera = reubicar_archivos_de_caja(caja_id)
-
-            # 2) Meter archivos pendientes que ahora sí caben
             movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(caja_id)
 
             total_movidos = movidos_fuera + movidos_dentro
@@ -157,29 +155,37 @@ def cajas():
 
             return redirect(url_for("cajas"))
 
-
-
         # ======================
         # CREAR CAJA
         # ======================
-        rmin = int(request.form["rango_min"])
-        rmax = int(request.form["rango_max"])
+        if accion == "crear":
+            rmin = int(request.form["rango_min"])
+            rmax = int(request.form["rango_max"])
 
-        nueva_caja_id = crear_caja(
-            rmin,
-            rmax,
-            creado_por=session.get("usuario_id")
-        )
+            nueva_caja_id = crear_caja(
+                rmin,
+                rmax,
+                creado_por=session.get("usuario_id")
+            )
 
-        # Reubicar archivos pendientes (Caja 0) si encajan en la nueva caja
-        reubicar_archivos_pendientes_por_nueva_caja(nueva_caja_id)
+            # Reubicar archivos pendientes (Caja 0) si encajan en la nueva caja
+            movidos = reubicar_archivos_pendientes_por_nueva_caja(nueva_caja_id)
 
-        registrar_log(
-            session.get("usuario_id"),
-            f"CREAR_CAJA rango={rmin}-{rmax}",
-            request.remote_addr
-        )
+            registrar_log(
+                session.get("usuario_id"),
+                f"CREAR_CAJA caja_id={nueva_caja_id} rango={rmin}-{rmax} movidos_desde_caja0={movidos}",
+                request.remote_addr
+            )
 
+            if movidos > 0:
+                flash(f"Caja creada. Se movieron {movidos} archivo(s) desde Caja 0.", "success")
+            else:
+                flash("Caja creada correctamente.", "success")
+
+            return redirect(url_for("cajas"))
+
+        # Si llega algo raro:
+        flash("Acción no válida.", "error")
         return redirect(url_for("cajas"))
 
     # ======================
@@ -243,6 +249,7 @@ def archivos():
     if request.method == "POST":
         accion = request.form["accion"]
 
+
         # ✅ AGREGAR (formulario de arriba)
         if accion == "agregar":
             numero = int(request.form["numero"])
@@ -262,9 +269,10 @@ def archivos():
 
             registrar_log(
                 session.get("usuario_id"),
-                f"AGREGAR_ARCHIVO | caja_id={caja_id} | numero={numero} | nombre={nombre_final}",
+                f"ARCHIVO|tipo=REGISTRO|numero_new={numero}|nombre_new={nombre_final}|caja={caja_id}",
                 request.remote_addr
             )
+
 
             return redirect(url_for("archivos"))
 
@@ -277,9 +285,20 @@ def archivos():
             conn = get_db()
             cur = conn.cursor()
 
-            cur.execute("SELECT caja_id FROM archivos WHERE numero = %s", (numero_old,))
+            # Antes:
+            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero_old,))
             antes = cur.fetchone()
             caja_id = antes[0] if antes else 0
+            numero_viejo = antes[1] if antes else numero_old
+            nombre_viejo = antes[2] if antes else ""
+
+            # ... haces el UPDATE ...
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_id}",
+                request.remote_addr
+            )
 
             cur.execute("""
                 UPDATE archivos
@@ -320,7 +339,7 @@ def archivos():
 
             registrar_log(
                 session.get("usuario_id"),
-                f"ELIMINAR_ARCHIVO | caja_id={caja_id} | numero={numero} | nombre={nombre_final}",
+                f"ARCHIVO|tipo=ELIMINACION|numero_old={numero}|nombre_old={nombre_final}|caja={caja_id}",
                 request.remote_addr
             )
 
@@ -353,6 +372,7 @@ def archivos():
         LEFT JOIN ranked r ON r.id = c.id
         ORDER BY caja, a.numero
     """)
+
     datos = cur.fetchall()
 
     # Buscador
@@ -390,9 +410,7 @@ def archivos():
     # Últimos movimientos (10)
     cur.execute("""
         WITH ranked AS (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
             WHERE id <> 0
         ),
@@ -400,33 +418,60 @@ def archivos():
             SELECT
                 l.fecha,
                 l.accion,
-                NULLIF(substring(l.accion from 'caja_id=([0-9]+)') , '')::int AS caja_id,
-                NULLIF(substring(l.accion from 'numero=([0-9]+)') , '')::bigint AS documento,
-                substring(l.accion from 'nombre=([^|]+)') AS nombre,
-                CASE
-                    WHEN l.accion LIKE 'AGREGAR_ARCHIVO%' THEN 'Registro'
-                    WHEN l.accion LIKE 'MODIFICAR_ARCHIVO%' THEN 'Modificación'
-                    WHEN l.accion LIKE 'ELIMINAR_ARCHIVO%' THEN 'Eliminación'
-                    ELSE 'Otro'
-                END AS tipo
+                NULLIF(substring(l.accion from 'caja=([0-9]+)'), '')::int AS caja_id,
+                NULLIF(substring(l.accion from 'numero_old=([0-9]+)'), '')::bigint AS numero_old,
+                NULLIF(substring(l.accion from 'numero_new=([0-9]+)'), '')::bigint AS numero_new,
+                substring(l.accion from 'nombre_old=([^|]+)') AS nombre_old,
+                substring(l.accion from 'nombre_new=([^|]+)') AS nombre_new,
+                substring(l.accion from 'tipo=([^|]+)') AS tipo_raw
             FROM logs l
-            WHERE l.accion LIKE 'AGREGAR_ARCHIVO%'
-               OR l.accion LIKE 'MODIFICAR_ARCHIVO%'
-               OR l.accion LIKE 'ELIMINAR_ARCHIVO%'
+            WHERE l.accion LIKE 'ARCHIVO|tipo=%'
             ORDER BY l.fecha DESC
             LIMIT 10
         )
         SELECT
             ROW_NUMBER() OVER (ORDER BY b.fecha DESC) AS movimiento,
+
             CASE
                 WHEN COALESCE(b.caja_id, a.caja_id, 0) = 0 THEN 0
                 ELSE r.caja_visible
             END AS caja,
-            COALESCE(b.documento, a.numero) AS documento,
-            COALESCE(b.nombre, a.nombre, '') AS nombre,
-            b.tipo
+
+            COALESCE(b.numero_new, b.numero_old, a.numero) AS documento,
+            COALESCE(b.nombre_new, b.nombre_old, a.nombre, '') AS nombre,
+
+            CASE
+                WHEN b.tipo_raw = 'REGISTRO' THEN 'Registro'
+                WHEN b.tipo_raw = 'MODIFICACION' THEN 'Modificación'
+                WHEN b.tipo_raw = 'ELIMINACION' THEN 'Eliminación'
+                ELSE 'Otro'
+            END AS tipo,
+
+            CASE
+                WHEN b.tipo_raw = 'REGISTRO' THEN
+                    'Se registró el documento y el nombre.'
+                WHEN b.tipo_raw = 'ELIMINACION' THEN
+                    'Se eliminó el documento y su nombre.'
+                WHEN b.tipo_raw = 'MODIFICACION' THEN
+                    TRIM(
+                        BOTH ', ' FROM
+                        (CASE
+                            WHEN b.numero_old IS NOT NULL AND b.numero_new IS NOT NULL AND b.numero_old <> b.numero_new
+                            THEN 'Documento: ' || b.numero_old || ' → ' || b.numero_new || ', '
+                            ELSE ''
+                        END)
+                        ||
+                        (CASE
+                            WHEN COALESCE(b.nombre_old,'') <> COALESCE(b.nombre_new,'')
+                            THEN 'Nombre: ' || COALESCE(b.nombre_old,'') || ' → ' || COALESCE(b.nombre_new,'')
+                            ELSE ''
+                        END)
+                    )
+                ELSE
+                    'Sin detalle'
+            END AS detalle
         FROM base b
-        LEFT JOIN archivos a ON a.numero = b.documento
+        LEFT JOIN archivos a ON a.numero = COALESCE(b.numero_new, b.numero_old)
         LEFT JOIN ranked r ON r.id = COALESCE(b.caja_id, a.caja_id)
         ORDER BY movimiento
     """)

@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px;
+  }
+  .topbar .left, .topbar .center, .topbar .right{ flex:1; }
+  .topbar .center{ display:flex; justify-content:center; gap:10px; align-items:center; }
+  .topbar .right{ text-align:right; }
+
+  .btn{
+    padding:10px 14px; border:2px solid #000; background:#fff; cursor:pointer;
+    min-width:220px; border-radius:8px;
+  }
+  .btn-small{
+    padding:8px 10px; border:2px solid #000; background:#fff; cursor:pointer;
+    border-radius:8px; min-width:auto; font-size:13px; display:inline-block;
+  }
+  .btn-danger{ border-color:#b00020; color:#b00020; }
+  .btn-disabled{ opacity:.55; cursor:not-allowed; }
+
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap:26px;
+    margin-top:28px;
+  }
+  .boxbtn{
+    border:3px solid #000;
+    background:#fff;
+    padding:16px;
+    height:140px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-decoration:none;
+    color:#000;
+    border-radius:10px;
+  }
+  .boxbtn .emoji{ font-size:46px; line-height:1; }
+  .boxbtn .num{ font-size:28px; margin-top:8px; font-weight:bold; }
+  .boxbtn .meta{ font-size:12px; margin-top:6px; color:#444; }
+
+  /* Modal */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
+  }
+  .modal{
+    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(720px,92vw); background:#fff; border-radius:12px; padding:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:1000;
+  }
+  .modal .actions{
+    display:flex; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap;
+  }
+  .modal input{
+    width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
+  }
+
+  /* Excel FAB */
+  .excel-fab{
+    position: fixed;
+    right: 26px;
+    bottom: 26px;
+    z-index: 2000;
+  }
+
+  /* tabla modal */
+  .table-wrap{ overflow:auto; }
+  table{ border-collapse:collapse; width:100%; }
+  th, td{ border:1px solid #000; padding:10px; vertical-align:middle; }
+  th{ background:#f5f5f5; }
+  .acciones-cell{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
+  /* helper para el server-data (no ocupa espacio visual) */
+  #server-data{ display:none; }
+</style>
+
+<h2>📦 Archivo</h2>
+
+<div class="topbar">
+  <div class="left">
+    <button class="btn" type="button" onclick="abrirModal('Caja')">AGREGAR CAJA</button>
+  </div>
+
+  <div class="center">
+    <form method="get" action="{{ url_for('archivo') }}" style="display:flex; gap:10px; align-items:center;">
+      <input class="btn" style="min-width:280px;" type="number" name="buscar" placeholder="BUSCAR DOCUMENTO" required>
+      <button class="btn" style="min-width:auto;" type="submit">BUSCAR</button>
+    </form>
+  </div>
+
+  <div class="right">
+    <button class="btn" type="button" onclick="abrirModal('Doc')">AGREGAR DOCUMENTO</button>
+  </div>
+</div>
+
+<div class="grid">
+  {% for c in cajas %}
+    <a class="boxbtn" href="{{ url_for('archivo_caja', caja_id=c[0]) }}">
+      <div class="emoji">📦</div>
+      <div class="num">{{ c[1] }}</div>
+      <div class="meta">
+        {% if c[1] == 0 %}
+          Pendiente ({{ c[4] }} archivos)
+        {% else %}
+          {{ c[4] }} archivos
+        {% endif %}
+      </div>
+    </a>
+  {% endfor %}
+</div>
+
+<!-- Excel -->
+<div class="excel-fab">
+  <a class="btn" href="{{ url_for('export_excel') }}">⬇️ Descargar Excel</a>
+</div>
+
+<!-- ===== MODAL CREAR CAJA ===== -->
+<div class="modal-overlay" id="overlayCaja"></div>
+<div class="modal" id="modalCaja">
+  <h3>➕ Crear caja</h3>
+
+  <form method="post">
+    <input type="hidden" name="accion" value="crear_caja">
+
+    <label>Rango mínimo</label><br>
+    <input type="number" name="rango_min" required><br><br>
+
+    <label>Rango máximo</label><br>
+    <input type="number" name="rango_max" required><br><br>
+
+    <div class="actions">
+      <button type="button" class="btn" onclick="cerrarModal('Caja')">Cancelar</button>
+      <button type="submit" class="btn">Crear</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== MODAL AGREGAR DOCUMENTO (PDF) ===== -->
+<div class="modal-overlay" id="overlayDoc"></div>
+<div class="modal" id="modalDoc">
+  <h3>➕ Agregar documento</h3>
+
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="accion" value="agregar_documento">
+
+    <label>Documento (número)</label><br>
+    <input type="number" name="numero" required><br><br>
+
+    <label>Nombre</label><br>
+    <input type="text" name="nombre" required><br><br>
+
+    <label>PDF (opcional)</label><br>
+    <input type="file" name="pdf" accept="application/pdf"><br><br>
+
+    <div class="actions">
+      <button type="button" class="btn" onclick="cerrarModal('Doc')">Cancelar</button>
+      <button type="submit" class="btn">Agregar</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== MODAL RESULTADO BUSQUEDA ===== -->
+<div class="modal-overlay" id="overlayBuscar"></div>
+<div class="modal" id="modalBuscar">
+  <h3>🔎 Resultado de búsqueda</h3>
+
+  <div id="buscarContenido" class="table-wrap" style="margin-top:10px;"></div>
+
+  <div class="actions">
+    <button type="button" class="btn" onclick="cerrarModal('Buscar', true)">Cerrar</button>
+  </div>
+</div>
+
+<!-- ===== MODAL EDITAR (PDF) ===== -->
+<div class="modal-overlay" id="overlayEditar"></div>
+<div class="modal" id="modalEditar">
+  <h3>✏️ Modificar archivo</h3>
+  <p style="margin:6px 0 12px; color:#555;" id="editarInfo"></p>
+
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="accion" value="modificar_archivo_modal">
+    <input type="hidden" name="numero_old" id="numero_old">
+
+    <label>Documento (nuevo)</label><br>
+    <input type="number" name="numero_new" id="numero_new" required><br><br>
+
+    <label>Nombre (nuevo)</label><br>
+    <input type="text" name="nombre_new" id="nombre_new" required><br><br>
+
+    <label>PDF (opcional)</label><br>
+    <input type="file" name="pdf" accept="application/pdf"><br><br>
+
+    <!-- ✅ NUEVO: eliminar PDF actual -->
+    <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+      <input type="checkbox" name="remove_pdf" value="1">
+      Eliminar PDF actual (si existe)
+    </label>
+    <br>
+
+    <div class="actions">
+      <button type="button" class="btn" onclick="cerrarModal('Editar')">Cancelar</button>
+      <button type="submit" class="btn">Modificar</button>
+    </div>
+  </form>
+</div>
+
+<!-- =========================
+     ✅ Server data (sin <script>)
+     ========================= -->
+<div id="server-data"
+     data-json='{{ {
+       "urlCajaBase": url_for("archivo_caja", caja_id=0),
+       "urlPdfBase":  url_for("ver_pdf", numero=0),
+       "resultado":   resultado
+     } | tojson }}'>
+</div>
+
+<!-- ✅ JS externo (no rojo) -->
+<script src="{{ url_for('static', filename='archivo_dashboard.js') }}"></script>
+
+{% endblock %}

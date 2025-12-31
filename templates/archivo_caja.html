@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .header-row{
+    display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:14px;
+  }
+  .right-actions{
+    display:flex; gap:10px; align-items:center;
+  }
+  .btn{
+    padding:10px 14px; border:2px solid #000; background:#fff; cursor:pointer; text-decoration:none; color:#000;
+    border-radius:8px;
+  }
+
+  /* Modal genérico */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
+  }
+  .modal{
+    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(520px,92vw); background:#fff; border-radius:12px; padding:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:1000;
+  }
+  .modal input{
+    width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
+  }
+  .modal .actions{
+    display:flex; justify-content:space-between; margin-top:14px; gap:10px;
+  }
+</style>
+
+<div class="header-row">
+  <div>
+    <h2 style="margin:0;">📦 Caja {{ caja[1] }}</h2>
+
+    {% if caja[1] != 0 %}
+      <p style="margin:6px 0 0; color:#555;">
+        Rango: <strong>{{ caja[2] }} - {{ caja[3] }}</strong>
+        <button class="btn" style="margin-left:10px;" type="button"
+            onclick="abrirModalCaja('{{ caja[0] }}', '{{ caja[2] }}', '{{ caja[3] }}')">
+            Modificar caja
+        </button>
+
+      </p>
+    {% else %}
+      <p style="margin:6px 0 0; color:#555;">Caja pendiente (sin rango)</p>
+    {% endif %}
+  </div>
+
+  <div class="right-actions">
+    <a class="btn" href="{{ url_for('archivo') }}">⬅️ Atrás</a>
+  </div>
+</div>
+
+<hr>
+
+<h3>📄 Archivos en esta caja</h3>
+
+{% if archivos and archivos|length > 0 %}
+<table border="1" cellpadding="8" cellspacing="0">
+  <tr>
+    <th>Documento</th>
+    <th>Nombre</th>
+    <th>Acción</th>
+  </tr>
+
+  {% for a in archivos %}
+  <tr>
+    <td>{{ a[0] }}</td>
+    <td>{{ a[1] }}</td>
+    <td>
+      <button class="btn" type="button"
+              data-numero="{{ a[0] }}"
+              data-nombre="{{ a[1] }}"
+              onclick="abrirModalArchivo(this)">
+        Modificar
+      </button>
+
+      <form method="post" style="display:inline;">
+        <input type="hidden" name="accion" value="eliminar_archivo_fila">
+        <input type="hidden" name="numero" value="{{ a[0] }}">
+        <button class="btn" type="submit"
+                onclick="return confirm('¿Seguro que deseas eliminar el documento {{ a[0] }}?');">
+          Eliminar
+        </button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p style="color:#666;">No hay archivos en esta caja.</p>
+{% endif %}
+
+<!-- ==========================
+     MODAL MODIFICAR CAJA
+========================== -->
+<div class="modal-overlay" id="overlayCaja"></div>
+<div class="modal" id="modalCaja">
+  <h3>✏️ Modificar rango de caja</h3>
+
+  <form method="post">
+    <input type="hidden" name="accion" value="modificar_caja">
+    <input type="hidden" name="caja_id" id="caja_id_modal">
+
+    <label>Rango mínimo</label><br>
+    <input type="number" name="rango_min" id="rango_min_modal" required><br><br>
+
+    <label>Rango máximo</label><br>
+    <input type="number" name="rango_max" id="rango_max_modal" required><br><br>
+
+    <div class="actions">
+      <button class="btn" type="button" onclick="cerrarModalCaja()">Cancelar</button>
+      <button class="btn" type="submit">Modificar</button>
+    </div>
+  </form>
+</div>
+
+<!-- ==========================
+     MODAL MODIFICAR ARCHIVO
+========================== -->
+<div class="modal-overlay" id="overlayArchivo"></div>
+<div class="modal" id="modalArchivo">
+  <h3>✏️ Modificar archivo</h3>
+
+  <form method="post">
+    <input type="hidden" name="accion" value="modificar_archivo_fila">
+    <input type="hidden" name="numero_old" id="numero_old">
+
+    <label>Documento (nuevo)</label><br>
+    <input type="number" name="numero_new" id="numero_new" required><br><br>
+
+    <label>Nombre (nuevo)</label><br>
+    <input type="text" name="nombre_new" id="nombre_new" required><br><br>
+
+    <div class="actions">
+      <button class="btn" type="button" onclick="cerrarModalArchivo()">Cancelar</button>
+      <button class="btn" type="submit">Modificar</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  // ----- Modal Caja -----
+  function abrirModalCaja(id, rmin, rmax){
+    document.getElementById("caja_id_modal").value = id;
+    document.getElementById("rango_min_modal").value = rmin;
+    document.getElementById("rango_max_modal").value = rmax;
+
+    document.getElementById("overlayCaja").style.display = "block";
+    document.getElementById("modalCaja").style.display = "block";
+  }
+  function cerrarModalCaja(){
+    document.getElementById("overlayCaja").style.display = "none";
+    document.getElementById("modalCaja").style.display = "none";
+  }
+
+  // ----- Modal Archivo -----
+  function abrirModalArchivo(btn){
+    const numero = btn.getAttribute("data-numero");
+    const nombre = btn.getAttribute("data-nombre") || "";
+
+    document.getElementById("numero_old").value = numero;
+    document.getElementById("numero_new").value = numero;
+    document.getElementById("nombre_new").value = nombre;
+
+    document.getElementById("overlayArchivo").style.display = "block";
+    document.getElementById("modalArchivo").style.display = "block";
+  }
+  function cerrarModalArchivo(){
+    document.getElementById("overlayArchivo").style.display = "none";
+    document.getElementById("modalArchivo").style.display = "none";
+  }
+
+  // Cerrar al hacer clic en overlay
+  document.addEventListener("click", function(e){
+    if (e.target === document.getElementById("overlayCaja")) cerrarModalCaja();
+    if (e.target === document.getElementById("overlayArchivo")) cerrarModalArchivo();
+  });
+
+  // Cerrar con ESC
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape") { cerrarModalCaja(); cerrarModalArchivo(); }
+  });
+</script>
+
+{% endblock %}

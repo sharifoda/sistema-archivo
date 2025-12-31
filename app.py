@@ -1,5 +1,9 @@
 print(">>> APP.PY CORRECTO CARGADO <<<")
-
+import os
+from werkzeug.utils import secure_filename
+from flask import send_file, send_from_directory
+from openpyxl import Workbook
+from io import BytesIO
 from flask import Flask, render_template, request, redirect, url_for, session, send_file
 from cajas import (
     crear_caja,
@@ -20,7 +24,32 @@ from openpyxl.styles import Font
 from flask import flash
 
 app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "pdfs")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
+
 app.secret_key = "clave_super_secreta"
+
+def es_pdf(file):
+    if not file:
+        return False
+    filename = (file.filename or "").lower()
+    return filename.endswith(".pdf")
+
+def guardar_pdf(file, numero_documento):
+    """
+    Guarda el pdf y retorna el path relativo (para guardar en DB).
+    """
+    filename = secure_filename(file.filename)
+    # Guardar con nombre controlado (evita duplicados raros)
+    final_name = f"doc_{numero_documento}.pdf"
+    abs_path = os.path.join(app.config["UPLOAD_FOLDER"], final_name)
+    file.save(abs_path)
+    # Guardamos en DB un path relativo simple
+    return final_name
 
 
 def login_requerido():
@@ -383,22 +412,23 @@ def archivos():
             doc = int(buscar)
             cur.execute("""
                 WITH ranked AS (
-                    SELECT
-                        id,
-                        ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
-                    FROM cajas
-                    WHERE id <> 0
+                SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                FROM cajas
+                WHERE id <> 0
                 )
                 SELECT
-                    CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja,
-                    a.numero AS documento,
-                    a.nombre AS nombre
+                c.id AS caja_id,
+                CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+                a.numero AS documento,
+                a.nombre AS nombre,
+                a.pdf_path
                 FROM archivos a
-                JOIN cajas c ON a.caja_id = c.id
+                JOIN cajas c ON c.id = a.caja_id
                 LEFT JOIN ranked r ON r.id = c.id
                 WHERE a.numero = %s
-                LIMIT 1
-            """, (doc,))
+                LIMIT 1;
+            """, (numero_buscar,))
+
             resultado = cur.fetchone()
         except ValueError:
             resultado = ("error", buscar, None)
@@ -488,7 +518,444 @@ def archivos():
         edit_num=edit_num
     )
 
+# ---------------- ARCHIVO ----------------
 
+@app.route("/archivo", methods=["GET", "POST"])
+def archivo():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    asegurar_caja_sin_asignar()
+
+    # ===== POST: acciones del dashboard =====
+    if request.method == "POST":
+        accion = request.form.get("accion")
+
+        # ---------- Crear Caja ----------
+        if accion == "crear_caja":
+            rmin = int(request.form["rango_min"])
+            rmax = int(request.form["rango_max"])
+
+            nueva_caja_id = crear_caja(rmin, rmax, creado_por=session.get("usuario_id"))
+            movidos = reubicar_archivos_pendientes_por_nueva_caja(nueva_caja_id)
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"CREAR_CAJA caja_id={nueva_caja_id} rango={rmin}-{rmax} movidos_desde_caja0={movidos}",
+                request.remote_addr
+            )
+
+            flash("Caja creada correctamente.", "success")
+            return redirect(url_for("archivo"))
+
+        # ---------- Agregar Documento ----------
+        if accion == "agregar_documento":
+            numero = int(request.form["numero"])
+            nombre = request.form.get("nombre", "").strip()
+
+            # 1) crear archivo normal
+            agregar_archivo(numero, nombre, creado_por=session.get("usuario_id"))
+
+            # 2) si viene pdf, guardarlo y actualizar DB
+            file = request.files.get("pdf")
+            if file and file.filename:
+                if not es_pdf(file):
+                    flash("El archivo debe ser PDF.", "error")
+                    return redirect(url_for("archivo"))
+
+                pdf_name = guardar_pdf(file, numero)
+
+                conn = get_db()
+                cur = conn.cursor()
+                cur.execute("UPDATE archivos SET pdf_path = %s WHERE numero = %s", (pdf_name, numero))
+                conn.commit()
+                cur.close()
+                conn.close()
+
+            registrar_log(session.get("usuario_id"), f"AGREGAR_ARCHIVO numero={numero}", request.remote_addr)
+            flash("Documento agregado correctamente.", "success")
+            return redirect(url_for("archivo"))
+
+
+        # ---------- Eliminar Archivo (desde modal de búsqueda) ----------
+        if accion == "eliminar_archivo_modal":
+            numero = int(request.form["numero"])
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            # datos antes de borrar para log
+            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero,))
+            antes = cur.fetchone()
+
+            cur.execute("DELETE FROM archivos WHERE numero = %s", (numero,))
+            conn.commit()
+
+            cur.close()
+            conn.close()
+
+            if antes:
+                caja_old, numero_old, nombre_old = antes
+                registrar_log(
+                    session.get("usuario_id"),
+                    f"ARCHIVO|tipo=ELIMINACION|numero_old={numero_old}|nombre_old={nombre_old}|caja={caja_old}",
+                    request.remote_addr
+                )
+
+            flash("Archivo eliminado correctamente.", "success")
+            return redirect(url_for("archivo"))
+
+        # ---------- Modificar Archivo (desde modal de búsqueda) ----------
+
+    if request.method == "POST" and accion == "modificar_archivo_modal":
+        numero_old = int(request.form["numero_old"])
+        numero_new = int(request.form["numero_new"])
+        nombre_new = request.form.get("nombre_new", "").strip()
+
+        # NUEVO: checkbox para eliminar PDF actual
+        remove_pdf = request.form.get("remove_pdf") == "1"
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("SELECT caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s", (numero_old,))
+        antes = cur.fetchone()
+
+        if not antes:
+            cur.close()
+            conn.close()
+            flash("No se encontró el archivo a modificar.", "error")
+            return redirect(url_for("archivo"))
+
+        caja_old, numero_viejo, nombre_viejo, pdf_old = antes
+
+        # Caja destino según rangos del numero_new
+        cur.execute("""
+            SELECT id
+            FROM cajas
+            WHERE id <> 0 AND %s BETWEEN rango_min AND rango_max
+            ORDER BY rango_min, id
+            LIMIT 1
+        """, (numero_new,))
+        caja_dest = cur.fetchone()
+        caja_dest_id = caja_dest[0] if caja_dest else 0
+
+        # =========================
+        # NUEVO: eliminar PDF actual
+        # =========================
+        pdf_name = pdf_old
+
+        if remove_pdf and pdf_old:
+            try:
+                # Si pdf_old es relativo (ej: "static/pdfs/123.pdf"), lo volvemos absoluto
+                path = pdf_old
+                if not os.path.isabs(path):
+                    path = os.path.join(app.root_path, path)
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception as e:
+                print("Error eliminando PDF:", e)
+
+            pdf_name = None  # en DB quedará NULL
+
+        # =========================
+        # PDF (opcional) - reemplazo
+        # =========================
+        file = request.files.get("pdf")
+        if file and file.filename:
+            if not es_pdf(file):
+                cur.close()
+                conn.close()
+                flash("El archivo debe ser PDF.", "error")
+                return redirect(url_for("archivo"))
+
+            # Si había PDF anterior y no fue eliminado arriba, lo borramos (para evitar basura)
+            if pdf_old and not remove_pdf:
+                try:
+                    old_path = pdf_old
+                    if not os.path.isabs(old_path):
+                        old_path = os.path.join(app.root_path, old_path)
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                except Exception as e:
+                    print("Error eliminando PDF anterior:", e)
+
+            # Guardar nuevo PDF (tu función)
+            pdf_name = guardar_pdf(file, numero_new)
+
+        # Update
+        cur.execute("""
+            UPDATE archivos
+            SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s
+            WHERE numero = %s
+        """, (numero_new, nombre_new, caja_dest_id, pdf_name, numero_old))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        registrar_log(
+            session.get("usuario_id"),
+            f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|"
+            f"nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_dest_id}|"
+            f"pdf_eliminado={1 if (remove_pdf and pdf_old) else 0}|pdf_nuevo={1 if (file and file.filename) else 0}",
+            request.remote_addr
+        )
+
+        flash("Archivo modificado correctamente.", "success")
+        return redirect(url_for("archivo"))
+
+
+
+    # ===== GET: listado de cajas =====
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE id <> 0
+        )
+        SELECT
+            c.id AS caja_id,
+            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+            c.rango_min,
+            c.rango_max,
+            COUNT(a.id) AS total_archivos
+        FROM cajas c
+        LEFT JOIN archivos a ON a.caja_id = c.id
+        LEFT JOIN ranked r ON r.id = c.id
+        GROUP BY c.id, r.caja_visible, c.rango_min, c.rango_max
+        ORDER BY
+            CASE WHEN c.id = 0 THEN 1 ELSE 0 END,
+            caja_num
+    """)
+
+    cajas_data = cur.fetchall()
+
+    cajas_filtradas = [c for c in cajas_data if not (c[0] == 0 and c[4] == 0)]
+
+    # ===== Buscador para modal =====
+        # Buscador
+        # ===== Buscador para modal =====
+    resultado = None
+    buscar_raw = request.args.get("buscar", "").strip()
+
+    if buscar_raw:
+        try:
+            doc = int(buscar_raw)
+
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                    FROM cajas
+                    WHERE id <> 0
+                )
+                SELECT
+                    c.id AS caja_id,
+                    CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+                    a.numero AS documento,
+                    a.nombre AS nombre,
+                    a.pdf_path
+                FROM archivos a
+                JOIN cajas c ON c.id = a.caja_id
+                LEFT JOIN ranked r ON r.id = c.id
+                WHERE a.numero = %s
+                LIMIT 1
+            """, (doc,))
+
+            row = cur.fetchone()
+            if row:
+                resultado = row
+            else:
+                resultado = ("no",)
+
+        except ValueError:
+            resultado = ("error", buscar_raw)
+
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "archivo_dashboard.html",
+        cajas=cajas_filtradas,
+        resultado=resultado
+    )
+
+# ---------------- archivo_caja ----------------
+
+@app.route("/archivo/caja/<int:caja_id>", methods=["GET", "POST"])
+def archivo_caja(caja_id):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    asegurar_caja_sin_asignar()
+
+    # ======================
+    # POST: Acciones en esta caja
+    # ======================
+    if request.method == "POST":
+        accion = request.form.get("accion")
+
+        # ---------- MODIFICAR CAJA ----------
+        if accion == "modificar_caja":
+            nuevo_min = int(request.form["rango_min"])
+            nuevo_max = int(request.form["rango_max"])
+
+            modificar_caja(caja_id, nuevo_min, nuevo_max)
+
+            # Reubicar archivos según nuevo rango
+            movidos_fuera = reubicar_archivos_de_caja(caja_id)
+            movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(caja_id)
+            total = movidos_fuera + movidos_dentro
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"MODIFICAR_CAJA caja_id={caja_id} rango={nuevo_min}-{nuevo_max} reasignados={total}",
+                request.remote_addr
+            )
+
+            if total > 0:
+                flash(f"Se reasignaron automáticamente {total} archivo(s) según el nuevo rango.", "success")
+            else:
+                flash("El rango se actualizó. No fue necesario reasignar archivos.", "info")
+
+            return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+        # ---------- ELIMINAR ARCHIVO ----------
+        if accion == "eliminar_archivo_fila":
+            numero = int(request.form["numero"])
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            # obtener datos antes de borrar (para log)
+            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero,))
+            antes = cur.fetchone()
+
+            cur.execute("DELETE FROM archivos WHERE numero = %s", (numero,))
+            conn.commit()
+
+            cur.close()
+            conn.close()
+
+            if antes:
+                caja_old, numero_old, nombre_old = antes
+                registrar_log(
+                    session.get("usuario_id"),
+                    f"ARCHIVO|tipo=ELIMINACION|numero_old={numero_old}|nombre_old={nombre_old}|caja={caja_old}",
+                    request.remote_addr
+                )
+
+            flash("Archivo eliminado correctamente.", "success")
+            return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+        # ---------- MODIFICAR ARCHIVO (numero y/o nombre) ----------
+        if accion == "modificar_archivo_fila":
+            numero_old = int(request.form["numero_old"])
+            numero_new = int(request.form["numero_new"])
+            nombre_new = request.form.get("nombre_new", "").strip()
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            # datos anteriores
+            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero_old,))
+            antes = cur.fetchone()
+
+            if not antes:
+                cur.close()
+                conn.close()
+                flash("No se encontró el archivo a modificar.", "error")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+            caja_old, numero_viejo, nombre_viejo = antes
+
+            # decidir caja destino según rangos actuales
+            cur.execute("""
+                SELECT id
+                FROM cajas
+                WHERE id <> 0 AND %s BETWEEN rango_min AND rango_max
+                ORDER BY rango_min, id
+                LIMIT 1
+            """, (numero_new,))
+            caja_dest = cur.fetchone()
+            caja_dest_id = caja_dest[0] if caja_dest else 0
+
+            # actualizar
+            cur.execute("""
+                UPDATE archivos
+                SET numero = %s, nombre = %s, caja_id = %s
+                WHERE numero = %s
+            """, (numero_new, nombre_new, caja_dest_id, numero_old))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_dest_id}",
+                request.remote_addr
+            )
+
+            flash("Archivo modificado correctamente.", "success")
+
+            # si el archivo cambió de caja, llévalo a la nueva caja
+            if caja_dest_id != caja_id:
+                return redirect(url_for("archivo_caja", caja_id=caja_dest_id))
+            return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+        flash("Acción no válida.", "error")
+        return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+    # ======================
+    # GET: Render de la caja + archivos
+    # ======================
+    conn = get_db()
+    cur = conn.cursor()
+
+    # info de caja + numero visible
+    cur.execute("""
+        WITH ranked AS (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE id <> 0
+        )
+        SELECT
+            c.id,
+            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+            c.rango_min,
+            c.rango_max
+        FROM cajas c
+        LEFT JOIN ranked r ON r.id = c.id
+        WHERE c.id = %s
+    """, (caja_id,))
+    caja_info = cur.fetchone()
+
+    if not caja_info:
+        cur.close()
+        conn.close()
+        flash("La caja no existe.", "error")
+        return redirect(url_for("archivo"))
+
+    # archivos de la caja
+    cur.execute("""
+        SELECT a.numero, a.nombre
+        FROM archivos a
+        WHERE a.caja_id = %s
+        ORDER BY a.numero
+    """, (caja_id,))
+    archivos = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("archivo_caja.html", caja=caja_info, archivos=archivos)
 
 
 # ---------------- ADMIN: LOGS ----------------
@@ -523,74 +990,127 @@ def export_excel():
     if not login_requerido():
         return redirect(url_for("login"))
 
-    # 1) Consultas a la DB
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT id, rango_min, rango_max, fecha FROM cajas ORDER BY rango_min")
-    cajas_data = cur.fetchall()
-
+    # ===== 1) HOJA CAJAS (sin ID real, usando caja_visible) =====
     cur.execute("""
-        SELECT a.numero, a.nombre, c.rango_min, c.rango_max, a.fecha
-        FROM archivos a
-        JOIN cajas c ON a.caja_id = c.id
-        ORDER BY a.numero
+        WITH ranked AS (
+            SELECT id, rango_min, rango_max,
+                   ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE id <> 0
+        )
+        SELECT
+            r.caja_visible AS caja_num,
+            r.rango_min,
+            r.rango_max,
+            COALESCE(COUNT(a.id),0) AS total_archivos
+        FROM ranked r
+        LEFT JOIN archivos a ON a.caja_id = r.id
+        GROUP BY r.caja_visible, r.rango_min, r.rango_max
+        ORDER BY r.caja_visible
     """)
-    archivos_data = cur.fetchall()
+    cajas = cur.fetchall()
+
+    # Caja 0 (solo si tiene archivos)
+    cur.execute("""
+        SELECT COUNT(*) FROM archivos WHERE caja_id = 0
+    """)
+    total_caja0 = cur.fetchone()[0]
+
+    # ===== 2) HOJA ARCHIVOS (caja_visible, documento, nombre, pdf si/no) =====
+    cur.execute("""
+        WITH ranked AS (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE id <> 0
+        )
+        SELECT
+            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+            a.numero,
+            a.nombre,
+            CASE WHEN a.pdf_path IS NULL OR a.pdf_path = '' THEN 'No' ELSE 'Sí' END AS pdf
+        FROM archivos a
+        JOIN cajas c ON c.id = a.caja_id
+        LEFT JOIN ranked r ON r.id = c.id
+        ORDER BY caja_num, a.numero
+    """)
+    archivos = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    # 2) Crear Excel
+    # ===== Crear Excel =====
     wb = Workbook()
 
-    # Hoja 1: Cajas
-    ws_cajas = wb.active
-    ws_cajas.title = "Cajas"
-    headers_cajas = ["ID", "Rango mínimo", "Rango máximo", "Fecha"]
-    ws_cajas.append(headers_cajas)
-    for cell in ws_cajas[1]:
-        cell.font = Font(bold=True)
+    # ---- Hoja 1: Cajas ----
+    ws1 = wb.active
+    ws1.title = "Cajas"
+    ws1.append(["Caja", "Rango", "Total de archivos"])
 
-    for row in cajas_data:
-        ws_cajas.append(list(row))
+    for (caja_num, rmin, rmax, total) in cajas:
+        ws1.append([caja_num, f"{rmin}-{rmax}", total])
 
-    # Hoja 2: Archivos
-    ws_archivos = wb.create_sheet(title="Archivos")
-    headers_archivos = ["Número", "Nombre", "Rango min caja", "Rango max caja", "Fecha"]
-    ws_archivos.append(headers_archivos)
-    for cell in ws_archivos[1]:
-        cell.font = Font(bold=True)
+    if total_caja0 and total_caja0 > 0:
+        # Caja 0 al final, sin rango
+        ws1.append([0, "", total_caja0])
 
-    for row in archivos_data:
-        ws_archivos.append(list(row))
+    # ---- Hoja 2: Archivos ----
+    ws2 = wb.create_sheet("Archivos")
+    ws2.append(["Caja", "Número", "Nombre", "PDF"])
 
-    # Ajuste simple de ancho de columnas (opcional)
-    for ws in [ws_cajas, ws_archivos]:
+    # Insertar filas en blanco al cambiar de caja (como tu imagen)
+    last_caja = None
+    for (caja_num, numero, nombre, pdf) in archivos:
+        if last_caja is not None and caja_num != last_caja:
+            ws2.append([])  # fila en blanco entre cajas
+        ws2.append([caja_num, numero, nombre, pdf])
+        last_caja = caja_num
+
+    # Auto-width básico (opcional)
+    for ws in [ws1, ws2]:
         for col in ws.columns:
             max_len = 0
             col_letter = col[0].column_letter
             for cell in col:
-                try:
-                    max_len = max(max_len, len(str(cell.value)) if cell.value is not None else 0)
-                except:
-                    pass
-            ws.column_dimensions[col_letter].width = min(max_len + 2, 45)
+                if cell.value is not None:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = min(max_len + 2, 40)
 
-    # 3) Enviar como descarga
+    # Guardar a memoria y enviar
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
-    fecha = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    filename = f"reporte_cajas_archivos_{fecha}.xlsx"
-
     return send_file(
         output,
         as_attachment=True,
-        download_name=filename,
+        download_name="reporte_archivo.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+# PDF
+
+@app.route("/pdf/<int:numero>")
+def ver_pdf(numero):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT pdf_path FROM archivos WHERE numero = %s", (numero,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row or not row[0]:
+        # Si no hay PDF
+        return "No hay PDF para este documento.", 404
+
+    filename = row[0]
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=True)
 
 if __name__ == "__main__":
     app.run(debug=True)

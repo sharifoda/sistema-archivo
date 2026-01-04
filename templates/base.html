@@ -3,14 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>{% block title %}Sistema de Archivos{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 40px;
-        }
-        nav a {
-            margin-right: 15px;
-        }
         header {
             display: flex;
             justify-content: space-between;
@@ -34,7 +28,9 @@
 <body>
 
 <header>
-    <h2>Sistema de Archivos</h2>
+    <h2>
+      Sistema de Archivos{% if grupo_actual %} - {{ grupo_actual }}{% endif %}
+    </h2>
 
     {% if session.get("usuario") %}
         <div>
@@ -63,9 +59,15 @@
   {% if session.get("usuario") %}
     <a href="{{ url_for('inicio') }}">Inicio</a>
     <a href="{{ url_for('archivo') }}">Archivo</a>
+    {% if session.get("rol") in ["admin", "supervisor"] %}
+      {% if session.get("rol") == "supervisor" %}
+        <a href="{{ url_for('grupos') }}">Empresa</a>
+      {% else %}
+        <a href="{{ url_for('grupos') }}">Empresas</a>
+      {% endif %}
+    {% endif %}
   {% else %}
     <a href="{{ url_for('login') }}">Login</a>
-    <a href="{{ url_for('register') }}">Registro</a>
   {% endif %}
 
   {% if session.get("rol") == "admin" %}

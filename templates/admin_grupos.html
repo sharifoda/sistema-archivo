@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Admin: Grupos</h2>
+
+<h3>Crear grupo</h3>
+<form method="post">
+  <input type="hidden" name="accion" value="crear_grupo">
+  <input type="text" name="nombre" placeholder="Nombre del grupo" required>
+  <button type="submit">Crear</button>
+</form>
+
+<hr>
+
+{% for g in grupos %}
+  <h3>{{ g[1] }}</h3>
+  <p>
+    <a href="{{ url_for('admin_abrir_grupo', grupo_id=g[0]) }}">Abrir grupo</a>
+  </p>
+
+  <h4>Miembros</h4>
+  {% if g[2] and g[2]|length > 0 %}
+  <table border="1" cellpadding="6" cellspacing="0">
+    <tr>
+      <th>Usuario</th>
+      <th>Eliminar</th>
+      <th>Editar</th>
+      <th>Accion</th>
+    </tr>
+    {% for m in g[2] %}
+    <tr>
+      <td>{{ m[1] }}</td>
+      <td>{{ "Si" if m[2] else "No" }}</td>
+      <td>{{ "Si" if m[3] else "No" }}</td>
+      <td>
+        <form method="post" style="display:inline;">
+          <input type="hidden" name="accion" value="actualizar_permiso">
+          <input type="hidden" name="grupo_id" value="{{ g[0] }}">
+          <input type="hidden" name="usuario_id" value="{{ m[0] }}">
+          <label>
+            <input type="checkbox" name="puede_eliminar" value="1" {% if m[2] %}checked{% endif %}>
+            Eliminar
+          </label>
+          <label>
+            <input type="checkbox" name="puede_editar" value="1" {% if m[3] %}checked{% endif %}>
+            Editar
+          </label>
+          <button type="submit">Guardar</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>Sin miembros.</p>
+  {% endif %}
+
+  <h4>Agregar usuario</h4>
+  <form method="post">
+    <input type="hidden" name="accion" value="agregar_usuario">
+    <input type="hidden" name="grupo_id" value="{{ g[0] }}">
+    <input type="text" name="usuario" placeholder="Usuario" required>
+    <label>
+      <input type="checkbox" name="puede_eliminar" value="1">
+      Eliminar
+    </label>
+    <label>
+      <input type="checkbox" name="puede_editar" value="1" checked>
+      Editar
+    </label>
+    <button type="submit">Agregar</button>
+  </form>
+
+  <hr>
+{% endfor %}
+
+{% endblock %}

@@ -3,23 +3,205 @@
 {% block title %}Logs del sistema{% endblock %}
 
 {% block content %}
-<h2>📜 Auditoría del sistema (últimos 200)</h2>
+<style>
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 999;
+  }
+  .modal {
+    width: min(720px, 92vw);
+    background: white;
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    display: none;
+  }
+  .modal .actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+    gap: 8px;
+  }
+</style>
 
-<table border="1" cellpadding="8" cellspacing="0">
-  <tr>
-    <th>Usuario</th>
-    <th>Acción</th>
-    <th>Fecha</th>
-    <th>IP</th>
-  </tr>
+<h2>Logs</h2>
 
-  {% for r in registros %}
-  <tr>
-    <td>{{ r[0] }}</td>
-    <td>{{ r[1] }}</td>
-    <td>{{ r[2] }}</td>
-    <td>{{ r[3] }}</td>
-  </tr>
+<div style="margin-bottom:12px;">
+  <button type="button" onclick="showTab('auditoria')">Auditoria</button>
+  <button type="button" onclick="showTab('movimientos')">Movimientos</button>
+  <button type="button" onclick="showTab('usuarios')">Usuarios</button>
+</div>
+
+<div id="tab-auditoria">
+  <h3>Auditoria (ultimos 200)</h3>
+  <table border="1" cellpadding="8" cellspacing="0">
+    <tr>
+      <th>Usuario</th>
+      <th>Accion</th>
+      <th>Fecha</th>
+      <th>IP</th>
+      <th>Grupo</th>
+      <th>Abrir</th>
+    </tr>
+
+    {% for r in registros %}
+    <tr>
+      <td>{{ r[0] }}</td>
+      <td>{{ r[1] }}</td>
+      <td>{{ r[2] }}</td>
+      <td>{{ r[3] }}</td>
+      <td>{{ r[4] or "Sin grupo" }}</td>
+      <td>
+        {% if r[5] %}
+          <a href="{{ url_for('admin_abrir_grupo', grupo_id=r[5]) }}">Abrir</a>
+        {% else %}
+          -
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div id="tab-movimientos" style="display:none;">
+  <h3>Movimientos (ultimos 200)</h3>
+  <table border="1" cellpadding="8" cellspacing="0">
+    <tr>
+      <th>Fecha</th>
+      <th>Usuario</th>
+      <th>Grupo</th>
+      <th>Entidad</th>
+      <th>Accion</th>
+      <th>Antes</th>
+      <th>Despues</th>
+      <th>Accion</th>
+    </tr>
+    {% for m in movimientos %}
+    <tr>
+      <td>{{ m[1] }}</td>
+      <td>{{ m[2] }}</td>
+      <td>{{ m[3] or "Sin grupo" }}</td>
+      <td>{{ m[4] }}</td>
+      <td>{{ m[5] }}</td>
+      <td><pre>{{ m[6] }}</pre></td>
+      <td><pre>{{ m[7] }}</pre></td>
+      <td>
+        <form method="post" action="{{ url_for('deshacer_movimiento', mov_id=m[0]) }}">
+          <button type="submit">Deshacer</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div id="tab-usuarios" style="display:none;">
+  <h3>Usuarios registrados</h3>
+  <table border="1" cellpadding="8" cellspacing="0">
+    <tr>
+      <th>Usuario</th>
+      <th>Rol</th>
+      <th>Empresa(s)</th>
+      <th>Fecha de inscripcion</th>
+      <th>Accion</th>
+    </tr>
+    {% for u in usuarios %}
+    <tr>
+      <td>{{ u[1] }}</td>
+      <td>{{ u[2] }}</td>
+      <td>{{ u[4] }}</td>
+      <td>{{ u[3] }}</td>
+      <td>
+        <button type="button" onclick="abrirUsuario('{{ u[0] }}')">Modificar</button>
+        <form method="post" action="{{ url_for('grupos') }}" onsubmit="return confirm('¿Eliminar este usuario?');">
+          <input type="hidden" name="accion" value="eliminar_usuario">
+          <input type="hidden" name="usuario_id" value="{{ u[0] }}">
+          <button type="submit">Eliminar</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% for u in usuarios %}
+<div class="modal-overlay" id="overlay-user-{{ u[0] }}"></div>
+<div class="modal" id="modal-user-{{ u[0] }}">
+  <h4>Modificar usuario</h4>
+
+  <form method="post" action="{{ url_for('grupos') }}">
+    <input type="hidden" name="accion" value="actualizar_usuario">
+    <input type="hidden" name="usuario_id" value="{{ u[0] }}">
+
+    <label>Usuario</label><br>
+    <input type="text" name="usuario" value="{{ u[1] }}"><br><br>
+
+    <label>Contrasena (opcional)</label><br>
+    <input type="password" name="password" placeholder="Nueva contrasena"><br><br>
+
+    <label>Rol</label><br>
+    <select name="rol">
+      <option value="usuario" {% if u[2] == "usuario" %}selected{% endif %}>Usuario</option>
+      <option value="supervisor" {% if u[2] == "supervisor" %}selected{% endif %}>Supervisor</option>
+      <option value="admin" {% if u[2] == "admin" %}selected{% endif %}>Admin</option>
+    </select><br><br>
+
+    <label>Empresa</label><br>
+    <select name="grupo_id">
+      {% for g in grupos_todos %}
+        <option value="{{ g[0] }}"
+          {% if u[5] and u[5]|length > 0 and g[0] == u[5][0] %}selected{% endif %}>
+          {{ g[1] }}
+        </option>
+      {% endfor %}
+    </select>
+
+    <div class="actions">
+      <button type="button" onclick="cerrarUsuario('{{ u[0] }}')">Cancelar</button>
+      <button type="submit">Guardar</button>
+    </div>
+  </form>
+</div>
+{% endfor %}
+
+<script>
+function showTab(tab) {
+  document.getElementById("tab-auditoria").style.display = tab === "auditoria" ? "block" : "none";
+  document.getElementById("tab-movimientos").style.display = tab === "movimientos" ? "block" : "none";
+  document.getElementById("tab-usuarios").style.display = tab === "usuarios" ? "block" : "none";
+}
+
+showTab("auditoria");
+
+function abrirUsuario(id) {
+  document.getElementById("overlay-user-" + id).style.display = "block";
+  document.getElementById("modal-user-" + id).style.display = "block";
+}
+
+function cerrarUsuario(id) {
+  document.getElementById("overlay-user-" + id).style.display = "none";
+  document.getElementById("modal-user-" + id).style.display = "none";
+}
+
+document.addEventListener("click", function(e){
+  {% for u in usuarios %}
+  if (e.target === document.getElementById("overlay-user-{{ u[0] }}")) cerrarUsuario("{{ u[0] }}");
   {% endfor %}
-</table>
+});
+
+document.addEventListener("keydown", function(e){
+  if (e.key !== "Escape") return;
+  {% for u in usuarios %}
+  cerrarUsuario("{{ u[0] }}");
+  {% endfor %}
+});
+</script>
 {% endblock %}

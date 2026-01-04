@@ -10,7 +10,7 @@
 <!-- ✅ BUSCADOR -->
 <h3>🔎 Buscar documento</h3>
 <form method="get" action="{{ url_for('archivos') }}">
-    <input type="number" name="buscar" placeholder="Escribe el número de documento" required>
+    <input type="text" name="buscar" placeholder="Escribe el documento o nombre" required>
     <button type="submit">Buscar</button>
     {% if request.args.get("buscar") %}
         <a href="{{ url_for('archivos') }}" style="margin-left:10px;">Limpiar</a>
@@ -31,15 +31,15 @@
         </tr>
         <tr>
           <td>
-            {% if resultado[0] == 0 %}
+            {% if resultado[1] == 0 %}
               <strong>0</strong> (Pendiente)
             {% else %}
-              {{ resultado[0] }}
+              {{ resultado[1] }}
             {% endif %}
           </td>
-          <td>{{ resultado[1] }}</td>
           <td>{{ resultado[2] }}</td>
-          <td><em>Sin PDF</em></td>
+          <td>{{ resultado[3] }}</td>
+          <td>{{ "Sí" if resultado[4] else "No" }}</td>
         </tr>
       </table>
     {% endif %}

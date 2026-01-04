@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Admin: Movimientos</h2>
+<p>Ultimos 200 movimientos registrados.</p>
+
+<table border="1" cellpadding="8" cellspacing="0">
+  <tr>
+    <th>Fecha</th>
+    <th>Usuario</th>
+    <th>Grupo</th>
+    <th>Entidad</th>
+    <th>Accion</th>
+    <th>Antes</th>
+    <th>Despues</th>
+    <th>Accion</th>
+  </tr>
+  {% for m in movimientos %}
+  <tr>
+    <td>{{ m[1] }}</td>
+    <td>{{ m[2] }}</td>
+    <td>{{ m[3] or "Sin grupo" }}</td>
+    <td>{{ m[4] }}</td>
+    <td>{{ m[5] }}</td>
+    <td><pre>{{ m[6] }}</pre></td>
+    <td><pre>{{ m[7] }}</pre></td>
+    <td>
+      <form method="post" action="{{ url_for('deshacer_movimiento', mov_id=m[0]) }}">
+        <button type="submit">Deshacer</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% endblock %}

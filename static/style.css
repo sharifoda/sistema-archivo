@@ -1,9 +1,50 @@
 body {
-    font-family: Arial;
+    font-family: Arial, sans-serif;
     margin: 30px;
+    color: #111;
+    background: #fafafa;
 }
 
 nav a {
     margin-right: 10px;
     text-decoration: none;
+    color: #111;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    background: #fff;
+}
+
+th, td {
+    border: 1px solid #000;
+    padding: 10px;
+    vertical-align: middle;
+}
+
+th {
+    background: #f2f2f2;
+}
+
+tr:nth-child(even) td {
+    background: #f3f3f3;
+}
+
+tr:hover td {
+    background: #f6faff;
+}
+
+button, .btn, .btn-small, input[type="submit"] {
+    border: 2px solid #000;
+    background: #fff;
+    color: #000;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+button:disabled, .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }

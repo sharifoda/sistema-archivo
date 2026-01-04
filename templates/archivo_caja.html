@@ -10,7 +10,18 @@
   }
   .btn{
     padding:10px 14px; border:2px solid #000; background:#fff; cursor:pointer; text-decoration:none; color:#000;
-    border-radius:8px;
+    border-radius:8px; width:110px; height:38px; text-align:center; display:inline-flex;
+    align-items:center; justify-content:center; box-sizing:border-box; font-size:13px;
+  }
+  .btn-wide{
+    width:150px;
+  }
+  .btn-disabled{
+    opacity:.55;
+    cursor:not-allowed;
+  }
+  .row-highlight{
+    background:#fff5a5;
   }
 
   /* Modal genérico */
@@ -37,7 +48,7 @@
     {% if caja[1] != 0 %}
       <p style="margin:6px 0 0; color:#555;">
         Rango: <strong>{{ caja[2] }} - {{ caja[3] }}</strong>
-        <button class="btn" style="margin-left:10px;" type="button"
+        <button class="btn btn-wide" style="margin-left:10px;" type="button"
             onclick="abrirModalCaja('{{ caja[0] }}', '{{ caja[2] }}', '{{ caja[3] }}')">
             Modificar caja
         </button>
@@ -62,13 +73,15 @@
   <tr>
     <th>Documento</th>
     <th>Nombre</th>
+    <th>PDF</th>
     <th>Acción</th>
   </tr>
 
   {% for a in archivos %}
-  <tr>
+  <tr{% if highlight_num is not none and a[0] == highlight_num %} class="row-highlight"{% endif %}>
     <td>{{ a[0] }}</td>
     <td>{{ a[1] }}</td>
+    <td>{{ "Sí" if a|length > 2 and a[2] else "No" }}</td>
     <td>
       <button class="btn" type="button"
               data-numero="{{ a[0] }}"
@@ -85,6 +98,14 @@
           Eliminar
         </button>
       </form>
+
+      {% if a|length > 2 and a[2] %}
+        <a class="btn" href="{{ url_for('ver_pdf', numero=a[0]) }}" target="_blank" rel="noopener">Ver PDF</a>
+      {% else %}
+        <button class="btn btn-disabled" type="button" disabled title="Este documento no tiene PDF">
+          Ver PDF
+        </button>
+      {% endif %}
     </td>
   </tr>
   {% endfor %}
@@ -100,7 +121,7 @@
 <div class="modal" id="modalCaja">
   <h3>✏️ Modificar rango de caja</h3>
 
-  <form method="post">
+  <form method="post" id="form_modificar_caja">
     <input type="hidden" name="accion" value="modificar_caja">
     <input type="hidden" name="caja_id" id="caja_id_modal">
 
@@ -110,11 +131,18 @@
     <label>Rango máximo</label><br>
     <input type="number" name="rango_max" id="rango_max_modal" required><br><br>
 
-    <div class="actions">
-      <button class="btn" type="button" onclick="cerrarModalCaja()">Cancelar</button>
-      <button class="btn" type="submit">Modificar</button>
-    </div>
   </form>
+
+  <form method="post" onsubmit="return confirm('¿Seguro que deseas eliminar esta caja?');" style="margin:12px 0;">
+    <input type="hidden" name="accion" value="eliminar_caja">
+    <input type="hidden" name="caja_id" id="caja_id_modal_del">
+    <button class="btn btn-danger btn-wide" type="submit">Eliminar caja</button>
+  </form>
+
+  <div class="actions">
+    <button class="btn" type="button" onclick="cerrarModalCaja()">Cancelar</button>
+    <button class="btn" type="submit" form="form_modificar_caja">Modificar</button>
+  </div>
 </div>
 
 <!-- ==========================
@@ -124,20 +152,28 @@
 <div class="modal" id="modalArchivo">
   <h3>✏️ Modificar archivo</h3>
 
-  <form method="post">
+  <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="accion" value="modificar_archivo_fila">
+
     <input type="hidden" name="numero_old" id="numero_old">
 
-    <label>Documento (nuevo)</label><br>
-    <input type="number" name="numero_new" id="numero_new" required><br><br>
+    <label>Documento</label>
+    <input type="number" name="numero_new" id="numero_new" required>
 
-    <label>Nombre (nuevo)</label><br>
-    <input type="text" name="nombre_new" id="nombre_new" required><br><br>
+    <label>Nombre</label>
+    <input type="text" name="nombre_new" id="nombre_new" required>
 
-    <div class="actions">
-      <button class="btn" type="button" onclick="cerrarModalArchivo()">Cancelar</button>
-      <button class="btn" type="submit">Modificar</button>
-    </div>
+    <!-- 📄 NUEVO: subir PDF -->
+    <label>PDF (opcional)</label>
+    <input type="file" name="pdf" accept="application/pdf">
+
+    <!-- 🗑️ NUEVO: eliminar PDF -->
+    <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+      <input type="checkbox" name="remove_pdf" value="1">
+      Eliminar PDF actual
+    </label>
+
+    <button type="submit">Modificar</button>
   </form>
 </div>
 
@@ -145,6 +181,7 @@
   // ----- Modal Caja -----
   function abrirModalCaja(id, rmin, rmax){
     document.getElementById("caja_id_modal").value = id;
+    document.getElementById("caja_id_modal_del").value = id;
     document.getElementById("rango_min_modal").value = rmin;
     document.getElementById("rango_max_modal").value = rmax;
 

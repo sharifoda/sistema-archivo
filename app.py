@@ -15,7 +15,21 @@ from cajas import (
 )
 from archivos import agregar_archivo, modificar_archivo, eliminar_archivo
 from auth import crear_usuario, verificar_usuario, obtener_usuario_y_rol
+from grupos import (
+    crear_grupo,
+    agregar_usuario_a_grupo,
+    obtener_grupos_usuario,
+    obtener_todos_grupos,
+    obtener_miembros_grupo,
+    buscar_usuario_por_nombre,
+    usuario_puede_eliminar,
+    quitar_usuario_de_grupo,
+    eliminar_grupo_personal,
+    archivar_grupo
+)
 from logs import registrar_log
+from historial import registrar_movimiento
+from werkzeug.security import generate_password_hash
 from db import get_db
 from io import BytesIO
 from datetime import datetime
@@ -39,13 +53,13 @@ def es_pdf(file):
     filename = (file.filename or "").lower()
     return filename.endswith(".pdf")
 
-def guardar_pdf(file, numero_documento):
+def guardar_pdf(file, numero_documento, grupo_id):
     """
     Guarda el pdf y retorna el path relativo (para guardar en DB).
     """
     filename = secure_filename(file.filename)
     # Guardar con nombre controlado (evita duplicados raros)
-    final_name = f"doc_{numero_documento}.pdf"
+    final_name = f"doc_{grupo_id}_{numero_documento}.pdf"
     abs_path = os.path.join(app.config["UPLOAD_FOLDER"], final_name)
     file.save(abs_path)
     # Guardamos en DB un path relativo simple
@@ -58,6 +72,30 @@ def login_requerido():
 
 def admin_requerido():
     return session.get("rol") == "admin"
+
+
+def obtener_grupo_id():
+    return session.get("grupo_id")
+
+
+def supervisor_requerido():
+    return session.get("rol") in ("admin", "supervisor")
+
+
+def usuario_requerido():
+    return session.get("rol") not in ("admin", "supervisor")
+
+
+def es_archivador_grupo(grupo_id):
+    if not grupo_id:
+        return False
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT nombre FROM grupos WHERE id = %s", (grupo_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row and row[0] == "Archivador"
 
 
 # ---------------- LOGIN ----------------
@@ -73,8 +111,26 @@ def login():
             session["usuario_id"] = info[0]
             session["rol"] = info[1]
 
+            grupos = obtener_grupos_usuario(session["usuario_id"])
+            if grupos:
+                session["grupo_id"] = grupos[0][0]
+            else:
+                grupo_id = crear_grupo(f"Personal - {usuario}", creado_por=session["usuario_id"])
+                agregar_usuario_a_grupo(
+                    session["usuario_id"],
+                    grupo_id,
+                    puede_eliminar=True,
+                    puede_editar=True
+                )
+                session["grupo_id"] = grupo_id
+
             # LOG: LOGIN
-            registrar_log(session.get("usuario_id"), "LOGIN", request.remote_addr)
+            registrar_log(
+                session.get("usuario_id"),
+                "LOGIN",
+                request.remote_addr,
+                session.get("grupo_id")
+            )
 
             return redirect(url_for("inicio"))
 
@@ -84,16 +140,22 @@ def login():
 # ---------------- REGISTRO ----------------
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    if not login_requerido() or not admin_requerido():
+        return "Acceso denegado", 403
+
     if request.method == "POST":
         usuario = request.form["usuario"]
         password = request.form["password"]
 
         # Intento de crear usuario (debe devolver True/False si usas el auth.py mejorado)
-        ok = crear_usuario(usuario, password, rol="cliente")
+        user_id = crear_usuario(usuario, password, rol="cliente")
 
         # Si tu crear_usuario no devuelve nada (None), lo tratamos como éxito
-        if ok is False:
+        if user_id is False:
             return render_template("register.html", error="El usuario ya existe")
+
+        grupo_id = crear_grupo(f"Personal - {usuario}", creado_por=user_id)
+        agregar_usuario_a_grupo(user_id, grupo_id, puede_eliminar=True, puede_editar=True)
 
         return redirect(url_for("login"))
 
@@ -106,7 +168,12 @@ def register():
 @app.route("/logout")
 def logout():
     # LOG: LOGOUT (antes de borrar sesión)
-    registrar_log(session.get("usuario_id"), "LOGOUT", request.remote_addr)
+    registrar_log(
+        session.get("usuario_id"),
+        "LOGOUT",
+        request.remote_addr,
+        session.get("grupo_id")
+    )
 
     session.clear()
     return redirect(url_for("login"))
@@ -118,7 +185,262 @@ def inicio():
     if not login_requerido():
         return redirect(url_for("login"))
 
-    return render_template("inicio.html")
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT COUNT(*) FROM archivos WHERE grupo_id = %s",
+        (grupo_id,)
+    )
+    total_archivos = cur.fetchone()[0]
+
+    cur.execute(
+        "SELECT COUNT(*) FROM cajas WHERE grupo_id = %s AND is_pendiente = FALSE",
+        (grupo_id,)
+    )
+    total_cajas = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "inicio.html",
+        total_archivos=total_archivos,
+        total_cajas=total_cajas
+    )
+
+
+# ---------------- GRUPOS ----------------
+@app.route("/grupos", methods=["GET", "POST"])
+def grupos():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    if admin_requerido():
+        if request.method == "POST":
+            accion = request.form.get("accion")
+
+            if accion == "crear_grupo":
+                nombre = request.form.get("nombre", "").strip()
+                if nombre:
+                    crear_grupo(nombre, creado_por=session.get("usuario_id"))
+                    flash("Grupo creado correctamente.", "success")
+                else:
+                    flash("Debes ingresar un nombre de grupo.", "error")
+
+            if accion == "agregar_usuario":
+                grupo_id = int(request.form.get("grupo_id"))
+                usuario = request.form.get("usuario", "").strip()
+                puede_eliminar = request.form.get("puede_eliminar") == "1"
+                puede_editar = request.form.get("puede_editar") == "1"
+
+                user_row = buscar_usuario_por_nombre(usuario)
+                if not user_row:
+                    flash("El usuario no existe.", "error")
+                else:
+                    agregar_usuario_a_grupo(user_row[0], grupo_id, puede_eliminar, puede_editar)
+                    eliminar_grupo_personal(user_row[0], grupo_id)
+                    flash("Usuario agregado al grupo.", "success")
+
+            if accion == "actualizar_permiso":
+                grupo_id = int(request.form.get("grupo_id"))
+                usuario_id = int(request.form.get("usuario_id"))
+                puede_eliminar = request.form.get("puede_eliminar") == "1"
+                puede_editar = request.form.get("puede_editar") == "1"
+
+                agregar_usuario_a_grupo(usuario_id, grupo_id, puede_eliminar, puede_editar)
+                flash("Permisos actualizados.", "success")
+
+            if accion == "quitar_usuario":
+                grupo_id = int(request.form.get("grupo_id"))
+                usuario_id = int(request.form.get("usuario_id"))
+                quitar_usuario_de_grupo(usuario_id, grupo_id)
+                flash("Usuario removido del grupo.", "success")
+
+            if accion == "eliminar_grupo":
+                grupo_id = int(request.form.get("grupo_id"))
+                ok = archivar_grupo(grupo_id, session.get("usuario_id"))
+                if ok:
+                    flash("Grupo archivado y eliminado correctamente.", "success")
+                else:
+                    flash("El grupo no existe.", "error")
+
+            if accion == "crear_usuario":
+                usuario = request.form.get("usuario", "").strip()
+                password = request.form.get("password", "").strip()
+                rol = request.form.get("rol", "cliente").strip()
+                if not usuario or not password:
+                    flash("Usuario y contrasena son obligatorios.", "error")
+                else:
+                    user_id = crear_usuario(usuario, password, rol=rol)
+                    if user_id is False:
+                        flash("El usuario ya existe.", "error")
+                    else:
+                        grupo_id = crear_grupo(f"Personal - {usuario}", creado_por=user_id)
+                        agregar_usuario_a_grupo(user_id, grupo_id, puede_eliminar=True, puede_editar=True)
+                        flash("Usuario creado correctamente.", "success")
+
+            if accion == "actualizar_usuario":
+                usuario_id = int(request.form.get("usuario_id"))
+                nuevo_usuario = request.form.get("usuario", "").strip()
+                nuevo_rol = request.form.get("rol", "").strip()
+                nueva_password = request.form.get("password", "").strip()
+                nuevo_grupo_id = int(request.form.get("grupo_id"))
+
+                conn = get_db()
+                cur = conn.cursor()
+
+                try:
+                    if nuevo_usuario:
+                        cur.execute(
+                            "UPDATE usuarios SET usuario = %s WHERE id = %s",
+                            (nuevo_usuario, usuario_id)
+                        )
+
+                    if nuevo_rol:
+                        cur.execute(
+                            "UPDATE usuarios SET rol = %s WHERE id = %s",
+                            (nuevo_rol, usuario_id)
+                        )
+
+                        cur.execute(
+                            """
+                            UPDATE usuarios_grupos
+                            SET puede_eliminar = %s
+                            WHERE usuario_id = %s
+                            """,
+                            ((nuevo_rol in ("admin", "supervisor")), usuario_id)
+                        )
+
+                    if nueva_password:
+                        hash_pw = generate_password_hash(nueva_password)
+                        cur.execute(
+                            "UPDATE usuarios SET password = %s WHERE id = %s",
+                            (hash_pw, usuario_id)
+                        )
+
+                    cur.execute(
+                        "SELECT grupo_id FROM usuarios_grupos WHERE usuario_id = %s LIMIT 1",
+                        (usuario_id,)
+                    )
+                    current = cur.fetchone()
+                    current_group_id = current[0] if current else None
+
+                    if current_group_id != nuevo_grupo_id:
+                        cur.execute(
+                            "DELETE FROM usuarios_grupos WHERE usuario_id = %s",
+                            (usuario_id,)
+                        )
+                        agregar_usuario_a_grupo(
+                            usuario_id,
+                            nuevo_grupo_id,
+                            puede_eliminar=(nuevo_rol in ("admin", "supervisor")),
+                            puede_editar=True
+                        )
+                        eliminar_grupo_personal(usuario_id, nuevo_grupo_id)
+
+                    conn.commit()
+                    flash("Usuario actualizado correctamente.", "success")
+                except Exception as e:
+                    conn.rollback()
+                    flash(f"Error al actualizar usuario: {e}", "error")
+                finally:
+                    cur.close()
+                    conn.close()
+
+            if accion == "eliminar_usuario":
+                usuario_id = int(request.form.get("usuario_id"))
+                if usuario_id == session.get("usuario_id"):
+                    flash("No puedes eliminar tu propio usuario.", "error")
+                    return redirect(url_for("grupos"))
+
+                conn = get_db()
+                cur = conn.cursor()
+                cur.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
+                conn.commit()
+                cur.close()
+                conn.close()
+                flash("Usuario eliminado correctamente.", "success")
+
+            return redirect(url_for("grupos"))
+
+        grupos_data = obtener_todos_grupos()
+        grupos_info = []
+        for g in grupos_data:
+            miembros = obtener_miembros_grupo(g[0])
+            grupos_info.append((g[0], g[1], miembros))
+
+        return render_template("grupos.html", grupos=grupos_info, es_admin=True)
+
+    if usuario_requerido():
+        return redirect(url_for("archivo"))
+
+    grupos_data = obtener_grupos_usuario(session.get("usuario_id"))
+    grupos_info = []
+    conn = get_db()
+    cur = conn.cursor()
+    for g in grupos_data:
+        cur.execute(
+            """
+            SELECT
+                u.id,
+                u.usuario,
+                ug.puede_eliminar,
+                ug.puede_editar,
+                MAX(l.fecha) AS ultima_conexion
+            FROM usuarios_grupos ug
+            JOIN usuarios u ON u.id = ug.usuario_id
+            LEFT JOIN logs l ON l.usuario_id = u.id AND l.accion = 'LOGIN'
+            WHERE ug.grupo_id = %s
+            GROUP BY u.id, u.usuario, ug.puede_eliminar, ug.puede_editar
+            ORDER BY u.usuario
+            """,
+            (g[0],)
+        )
+        miembros = cur.fetchall()
+        grupos_info.append((g[0], g[1], g[2], g[3], miembros))
+    cur.close()
+    conn.close()
+    empresa_nombre = grupos_info[0][1] if grupos_info else "Empresa"
+    return render_template(
+        "grupos.html",
+        grupos=grupos_info,
+        es_admin=False,
+        empresa_nombre=empresa_nombre
+    )
+
+
+@app.context_processor
+def inject_grupo_actual():
+    nombre = None
+    grupo_id = session.get("grupo_id")
+    if grupo_id:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT nombre FROM grupos WHERE id = %s", (grupo_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        nombre = row[0] if row else None
+    return {"grupo_actual": nombre}
+
+
+@app.route("/grupos/seleccionar/<int:grupo_id>")
+def seleccionar_grupo(grupo_id):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    if not admin_requerido():
+        grupos_usuario = {g[0] for g in obtener_grupos_usuario(session.get("usuario_id"))}
+        if grupo_id not in grupos_usuario:
+            return "Acceso denegado", 403
+
+    session["grupo_id"] = grupo_id
+    return redirect(url_for("archivo"))
 
 
 # ---------------- CAJAS ----------------
@@ -127,8 +449,12 @@ def cajas():
     if not login_requerido():
         return redirect(url_for("login"))
 
-    # Asegurar que siempre exista la Caja 0
-    asegurar_caja_sin_asignar()
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    # Asegurar que siempre exista la caja pendiente
+    asegurar_caja_sin_asignar(grupo_id)
 
     if request.method == "POST":
         accion = request.form.get("accion")
@@ -139,12 +465,21 @@ def cajas():
         if accion == "eliminar":
             caja_id = int(request.form["caja_id"])
 
-            eliminar_caja(caja_id)
+            if not admin_requerido():
+                flash("Solo el admin puede eliminar cajas.", "error")
+                return redirect(url_for("cajas"))
+
+            if not admin_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
+                flash("No tienes permiso para eliminar cajas en este grupo.", "error")
+                return redirect(url_for("cajas"))
+
+            eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
 
             registrar_log(
                 session.get("usuario_id"),
                 f"ELIMINAR_CAJA caja_id={caja_id}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
             flash("Caja eliminada correctamente.", "success")
@@ -158,10 +493,18 @@ def cajas():
             nuevo_min = int(request.form["rango_min"])
             nuevo_max = int(request.form["rango_max"])
 
-            modificar_caja(caja_id, nuevo_min, nuevo_max)
+            if not admin_requerido():
+                flash("Solo el admin puede modificar cajas.", "error")
+                return redirect(url_for("cajas"))
 
-            movidos_fuera = reubicar_archivos_de_caja(caja_id)
-            movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(caja_id)
+            modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
+
+            movidos_fuera = reubicar_archivos_de_caja(caja_id, grupo_id, session.get("usuario_id"))
+            movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(
+                caja_id,
+                grupo_id,
+                session.get("usuario_id")
+            )
 
             total_movidos = movidos_fuera + movidos_dentro
 
@@ -179,7 +522,8 @@ def cajas():
             registrar_log(
                 session.get("usuario_id"),
                 f"MODIFICAR_CAJA caja_id={caja_id} rango={nuevo_min}-{nuevo_max} reasignados={total_movidos}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
             return redirect(url_for("cajas"))
@@ -191,19 +535,29 @@ def cajas():
             rmin = int(request.form["rango_min"])
             rmax = int(request.form["rango_max"])
 
+            if not admin_requerido():
+                flash("Solo el admin puede crear cajas.", "error")
+                return redirect(url_for("cajas"))
+
             nueva_caja_id = crear_caja(
                 rmin,
                 rmax,
+                grupo_id,
                 creado_por=session.get("usuario_id")
             )
 
             # Reubicar archivos pendientes (Caja 0) si encajan en la nueva caja
-            movidos = reubicar_archivos_pendientes_por_nueva_caja(nueva_caja_id)
+            movidos = reubicar_archivos_pendientes_por_nueva_caja(
+                nueva_caja_id,
+                grupo_id,
+                session.get("usuario_id")
+            )
 
             registrar_log(
                 session.get("usuario_id"),
                 f"CREAR_CAJA caja_id={nueva_caja_id} rango={rmin}-{rmax} movidos_desde_caja0={movidos}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
             if movidos > 0:
@@ -223,7 +577,8 @@ def cajas():
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
+        """
         WITH ranked AS (
             SELECT
                 id,
@@ -231,7 +586,7 @@ def cajas():
                 rango_max,
                 ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
-            WHERE id <> 0
+            WHERE grupo_id = %s AND is_pendiente = FALSE
         )
         SELECT
             c.id AS caja_id,
@@ -239,17 +594,21 @@ def cajas():
             c.rango_min,
             c.rango_max,
             CASE
-                WHEN c.id = 0 THEN 0
+                WHEN c.is_pendiente THEN 0
                 ELSE r.caja_visible
-            END AS caja_visible
+            END AS caja_visible,
+            c.is_pendiente
         FROM cajas c
-        LEFT JOIN archivos a ON a.caja_id = c.id
+        LEFT JOIN archivos a ON a.caja_id = c.id AND a.grupo_id = %s
         LEFT JOIN ranked r ON r.id = c.id
-        GROUP BY c.id, c.rango_min, c.rango_max, r.caja_visible
+        WHERE c.grupo_id = %s
+        GROUP BY c.id, c.rango_min, c.rango_max, c.is_pendiente, r.caja_visible
         ORDER BY
-            CASE WHEN c.id = 0 THEN 1 ELSE 0 END,
+            CASE WHEN c.is_pendiente THEN 1 ELSE 0 END,
             caja_visible
-    """)
+        """,
+        (grupo_id, grupo_id, grupo_id)
+    )
 
     cajas_data = cur.fetchall()
     cur.close()
@@ -258,7 +617,7 @@ def cajas():
     # Ocultar Caja 0 si está vacía
     cajas_filtradas = []
     for c in cajas_data:
-        if c[0] == 0 and c[1] == 0:
+        if c[5] and c[1] == 0:
             continue
         cajas_filtradas.append(c)
 
@@ -272,6 +631,10 @@ def archivos():
     if not login_requerido():
         return redirect(url_for("login"))
 
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
     # =========================
     # POST: agregar / modificar fila / eliminar fila
     # =========================
@@ -284,12 +647,15 @@ def archivos():
             numero = int(request.form["numero"])
             nombre = request.form.get("nombre", "").strip()
 
-            agregar_archivo(numero, nombre, creado_por=session.get("usuario_id"))
+            agregar_archivo(numero, nombre, grupo_id, creado_por=session.get("usuario_id"))
 
             # Log con info real
             conn = get_db()
             cur = conn.cursor()
-            cur.execute("SELECT caja_id, nombre FROM archivos WHERE numero = %s", (numero,))
+            cur.execute(
+                "SELECT caja_id, nombre FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero, grupo_id)
+            )
             info = cur.fetchone()
             caja_id = info[0] if info else 0
             nombre_final = info[1] if info else nombre
@@ -299,7 +665,8 @@ def archivos():
             registrar_log(
                 session.get("usuario_id"),
                 f"ARCHIVO|tipo=REGISTRO|numero_new={numero}|nombre_new={nombre_final}|caja={caja_id}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
 
@@ -315,25 +682,31 @@ def archivos():
             cur = conn.cursor()
 
             # Antes:
-            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero_old,))
+            cur.execute(
+                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero_old, grupo_id)
+            )
             antes = cur.fetchone()
-            caja_id = antes[0] if antes else 0
-            numero_viejo = antes[1] if antes else numero_old
-            nombre_viejo = antes[2] if antes else ""
+            archivo_id = antes[0] if antes else None
+            caja_id = antes[1] if antes else 0
+            numero_viejo = antes[2] if antes else numero_old
+            nombre_viejo = antes[3] if antes else ""
+            pdf_old = antes[4] if antes else None
 
             # ... haces el UPDATE ...
 
             registrar_log(
                 session.get("usuario_id"),
                 f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_id}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
             cur.execute("""
                 UPDATE archivos
                 SET numero = %s, nombre = %s
-                WHERE numero = %s
-            """, (numero_new, nombre_new, numero_old))
+                WHERE numero = %s AND grupo_id = %s
+            """, (numero_new, nombre_new, numero_old, grupo_id))
 
             conn.commit()
             cur.close()
@@ -342,8 +715,30 @@ def archivos():
             registrar_log(
                 session.get("usuario_id"),
                 f"MODIFICAR_ARCHIVO | caja_id={caja_id} | numero={numero_new} | nombre={nombre_new}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
+
+            if archivo_id:
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="archivo",
+                    entidad_id=archivo_id,
+                    accion="MODIFICAR_ARCHIVO",
+                    datos_antes={
+                        "numero": numero_viejo,
+                        "nombre": nombre_viejo,
+                        "caja_id": caja_id,
+                        "pdf_path": pdf_old,
+                    },
+                    datos_despues={
+                        "numero": numero_new,
+                        "nombre": nombre_new,
+                        "caja_id": caja_id,
+                        "pdf_path": pdf_old,
+                    },
+                )
 
             return redirect(url_for("archivos"))
 
@@ -352,11 +747,18 @@ def archivos():
         if accion == "eliminar_fila":
             numero = int(request.form["numero"])
 
+            if not supervisor_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
+                flash("No tienes permiso para eliminar archivos en este grupo.", "error")
+                return redirect(url_for("archivos"))
+
             conn = get_db()
             cur = conn.cursor()
 
             # guardar info antes de borrar
-            cur.execute("SELECT caja_id, nombre FROM archivos WHERE numero = %s", (numero,))
+            cur.execute(
+                "SELECT caja_id, nombre FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero, grupo_id)
+            )
             antes = cur.fetchone()
             caja_id = antes[0] if antes else 0
             nombre_final = antes[1] if antes else ""
@@ -364,12 +766,13 @@ def archivos():
             cur.close()
             conn.close()
 
-            eliminar_archivo(numero)
+            eliminar_archivo(numero, grupo_id, session.get("usuario_id"))
 
             registrar_log(
                 session.get("usuario_id"),
                 f"ARCHIVO|tipo=ELIMINACION|numero_old={numero}|nombre_old={nombre_final}|caja={caja_id}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
             return redirect(url_for("archivos"))
@@ -384,23 +787,27 @@ def archivos():
     cur = conn.cursor()
 
     # Listado normal (caja visible 1..N y caja 0)
-    cur.execute("""
+    cur.execute(
+        """
         WITH ranked AS (
             SELECT
                 id,
                 ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
-            WHERE id <> 0
+            WHERE grupo_id = %s AND is_pendiente = FALSE
         )
         SELECT
-            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja,
+            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja,
             a.numero AS documento,
             a.nombre AS nombre
         FROM archivos a
         JOIN cajas c ON a.caja_id = c.id
         LEFT JOIN ranked r ON r.id = c.id
+        WHERE a.grupo_id = %s
         ORDER BY caja, a.numero
-    """)
+        """,
+        (grupo_id, grupo_id)
+    )
 
     datos = cur.fetchall()
 
@@ -414,24 +821,45 @@ def archivos():
                 WITH ranked AS (
                 SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
                 FROM cajas
-                WHERE id <> 0
+                WHERE grupo_id = %s AND is_pendiente = FALSE
                 )
                 SELECT
                 c.id AS caja_id,
-                CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
                 a.numero AS documento,
                 a.nombre AS nombre,
                 a.pdf_path
                 FROM archivos a
                 JOIN cajas c ON c.id = a.caja_id
                 LEFT JOIN ranked r ON r.id = c.id
-                WHERE a.numero = %s
+                WHERE a.numero = %s AND a.grupo_id = %s
                 LIMIT 1;
-            """, (numero_buscar,))
+            """, (grupo_id, doc, grupo_id))
 
             resultado = cur.fetchone()
         except ValueError:
-            resultado = ("error", buscar, None)
+            cur.execute("""
+                WITH ranked AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                FROM cajas
+                WHERE grupo_id = %s AND is_pendiente = FALSE
+                )
+                SELECT
+                c.id AS caja_id,
+                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                a.numero AS documento,
+                a.nombre AS nombre,
+                a.pdf_path
+                FROM archivos a
+                JOIN cajas c ON c.id = a.caja_id
+                LEFT JOIN ranked r ON r.id = c.id
+                WHERE a.nombre ILIKE %s AND a.grupo_id = %s
+                ORDER BY a.numero
+                LIMIT 1;
+            """, (grupo_id, f"%{buscar}%", grupo_id))
+            resultado = cur.fetchone()
+            if not resultado:
+                resultado = ("no",)
 
     # Modo edición (qué documento está en edición)
     edit_num = request.args.get("edit", "").strip()
@@ -442,7 +870,7 @@ def archivos():
         WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
-            WHERE id <> 0
+            WHERE grupo_id = %s AND is_pendiente = FALSE
         ),
         base AS (
             SELECT
@@ -456,6 +884,7 @@ def archivos():
                 substring(l.accion from 'tipo=([^|]+)') AS tipo_raw
             FROM logs l
             WHERE l.accion LIKE 'ARCHIVO|tipo=%'
+              AND l.grupo_id = %s
             ORDER BY l.fecha DESC
             LIMIT 10
         )
@@ -463,7 +892,7 @@ def archivos():
             ROW_NUMBER() OVER (ORDER BY b.fecha DESC) AS movimiento,
 
             CASE
-                WHEN COALESCE(b.caja_id, a.caja_id, 0) = 0 THEN 0
+                WHEN c.is_pendiente THEN 0
                 ELSE r.caja_visible
             END AS caja,
 
@@ -502,9 +931,12 @@ def archivos():
             END AS detalle
         FROM base b
         LEFT JOIN archivos a ON a.numero = COALESCE(b.numero_new, b.numero_old)
-        LEFT JOIN ranked r ON r.id = COALESCE(b.caja_id, a.caja_id)
+                           AND a.grupo_id = %s
+        LEFT JOIN cajas c ON c.id = COALESCE(b.caja_id, a.caja_id)
+                         AND c.grupo_id = %s
+        LEFT JOIN ranked r ON r.id = c.id
         ORDER BY movimiento
-    """)
+    """, (grupo_id, grupo_id, grupo_id))
     movimientos = cur.fetchall()
 
     cur.close()
@@ -525,226 +957,399 @@ def archivo():
     if not login_requerido():
         return redirect(url_for("login"))
 
-    asegurar_caja_sin_asignar()
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
 
-    # ===== POST: acciones del dashboard =====
+    asegurar_caja_sin_asignar(grupo_id)
+
+    archivador_mode = admin_requerido() and es_archivador_grupo(grupo_id)
+    view_mode = request.args.get("view", "").strip()
+
+    if request.method == "GET" and archivador_mode and view_mode == "especial":
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT id, rango_min, rango_max, is_pendiente, grupo_origen_id
+            FROM cajas
+            WHERE grupo_id = %s
+            ORDER BY is_pendiente, rango_min, id
+            """,
+            (grupo_id,)
+        )
+        cajas_rows = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT id, numero, nombre, caja_id, pdf_path, grupo_origen_id
+            FROM archivos
+            WHERE grupo_id = %s
+            ORDER BY caja_id, numero
+            """,
+            (grupo_id,)
+        )
+        archivos_rows = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT id, nombre
+            FROM grupos
+            WHERE archivado = FALSE AND nombre <> 'Archivador'
+            ORDER BY nombre
+            """
+        )
+        grupos_destino = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        cajas_map = {}
+        for c in cajas_rows:
+            cajas_map[c[0]] = {
+                "id": c[0],
+                "rango_min": c[1],
+                "rango_max": c[2],
+                "is_pendiente": c[3],
+                "grupo_origen_id": c[4],
+                "archivos": []
+            }
+
+        for a in archivos_rows:
+            caja_id = a[3]
+            if caja_id not in cajas_map:
+                cajas_map[caja_id] = {
+                    "id": caja_id,
+                    "rango_min": None,
+                    "rango_max": None,
+                    "is_pendiente": False,
+                    "grupo_origen_id": None,
+                    "archivos": []
+                }
+            cajas_map[caja_id]["archivos"].append({
+                "id": a[0],
+                "numero": a[1],
+                "nombre": a[2],
+                "pdf_path": a[4],
+                "grupo_origen_id": a[5],
+            })
+
+        cajas_list = []
+        for c in cajas_map.values():
+            if c["is_pendiente"] and not c["archivos"]:
+                continue
+            cajas_list.append(c)
+
+        return render_template(
+            "archivo_archivador.html",
+            cajas=cajas_list,
+            grupos_destino=grupos_destino
+        )
+
+    # =========================================================
+    # POST: acciones del dashboard
+    # =========================================================
+    accion = request.form.get("accion") if request.method == "POST" else None
+
     if request.method == "POST":
-        accion = request.form.get("accion")
-
         # ---------- Crear Caja ----------
         if accion == "crear_caja":
             rmin = int(request.form["rango_min"])
             rmax = int(request.form["rango_max"])
 
-            nueva_caja_id = crear_caja(rmin, rmax, creado_por=session.get("usuario_id"))
-            movidos = reubicar_archivos_pendientes_por_nueva_caja(nueva_caja_id)
+            if not admin_requerido():
+                flash("Solo el admin puede crear cajas.", "error")
+                return redirect(url_for("archivo"))
+
+            nueva_caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=session.get("usuario_id"))
+            movidos = reubicar_archivos_pendientes_por_nueva_caja(
+                nueva_caja_id,
+                grupo_id,
+                session.get("usuario_id")
+            )
 
             registrar_log(
                 session.get("usuario_id"),
                 f"CREAR_CAJA caja_id={nueva_caja_id} rango={rmin}-{rmax} movidos_desde_caja0={movidos}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
             flash("Caja creada correctamente.", "success")
             return redirect(url_for("archivo"))
 
         # ---------- Agregar Documento ----------
-        if accion == "agregar_documento":
+        elif accion == "agregar_documento":
             numero = int(request.form["numero"])
             nombre = request.form.get("nombre", "").strip()
-
-            # 1) crear archivo normal
-            agregar_archivo(numero, nombre, creado_por=session.get("usuario_id"))
-
-            # 2) si viene pdf, guardarlo y actualizar DB
-            file = request.files.get("pdf")
-            if file and file.filename:
-                if not es_pdf(file):
-                    flash("El archivo debe ser PDF.", "error")
-                    return redirect(url_for("archivo"))
-
-                pdf_name = guardar_pdf(file, numero)
-
-                conn = get_db()
-                cur = conn.cursor()
-                cur.execute("UPDATE archivos SET pdf_path = %s WHERE numero = %s", (pdf_name, numero))
-                conn.commit()
-                cur.close()
-                conn.close()
-
-            registrar_log(session.get("usuario_id"), f"AGREGAR_ARCHIVO numero={numero}", request.remote_addr)
-            flash("Documento agregado correctamente.", "success")
-            return redirect(url_for("archivo"))
-
-
-        # ---------- Eliminar Archivo (desde modal de búsqueda) ----------
-        if accion == "eliminar_archivo_modal":
-            numero = int(request.form["numero"])
 
             conn = get_db()
             cur = conn.cursor()
 
-            # datos antes de borrar para log
-            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero,))
-            antes = cur.fetchone()
+            # 1) Determinar caja destino por rangos
+            cur.execute("""
+                SELECT id
+                FROM cajas
+                WHERE grupo_id = %s
+                  AND is_pendiente = FALSE
+                  AND %s BETWEEN rango_min AND rango_max
+                ORDER BY rango_min, id
+                LIMIT 1
+            """, (grupo_id, numero))
+            caja_dest = cur.fetchone()
+            caja_id = caja_dest[0] if caja_dest else asegurar_caja_sin_asignar(grupo_id)  # ✅ si no cae en ninguna caja → 0
 
-            cur.execute("DELETE FROM archivos WHERE numero = %s", (numero,))
+            # 2) Insertar archivo YA con caja_id
+            # (si tu tabla tiene otras columnas obligatorias, aquí se ajusta, pero esto es lo normal)
+            cur.execute("""
+                INSERT INTO archivos (caja_id, numero, nombre, pdf_path, grupo_id, creado_por)
+                VALUES (%s, %s, %s, NULL, %s, %s)
+                RETURNING id
+            """, (caja_id, numero, nombre, grupo_id, session.get("usuario_id")))
+            archivo_id = cur.fetchone()[0]
+
+            # 3) PDF opcional: guardar y actualizar pdf_path
+            pdf_name = None
+            file = request.files.get("pdf")
+            if file and file.filename:
+                if not es_pdf(file):
+                    cur.close()
+                    conn.close()
+                    flash("El archivo debe ser PDF.", "error")
+                    return redirect(url_for("archivo"))
+
+                pdf_name = guardar_pdf(file, numero, grupo_id)
+                cur.execute(
+                    "UPDATE archivos SET pdf_path = %s WHERE numero = %s AND grupo_id = %s",
+                    (pdf_name, numero, grupo_id)
+                )
+
             conn.commit()
-
             cur.close()
             conn.close()
 
+            registrar_log(
+                session.get("usuario_id"),
+                f"ARCHIVO|tipo=CREACION|numero={numero}|nombre={nombre}|caja={caja_id}",
+                request.remote_addr,
+                grupo_id
+            )
+
+            registrar_movimiento(
+                session.get("usuario_id"),
+                grupo_id,
+                entidad="archivo",
+                entidad_id=archivo_id,
+                accion="CREAR_ARCHIVO",
+                datos_despues={
+                    "id": archivo_id,
+                    "numero": numero,
+                    "nombre": nombre,
+                    "caja_id": caja_id,
+                    "pdf_path": pdf_name,
+                },
+            )
+
+            flash("Documento agregado correctamente.", "success")
+            return redirect(url_for("archivo"))
+
+        # ---------- Eliminar Archivo (desde modal de búsqueda) ----------
+        elif accion == "eliminar_archivo_modal":
+            numero = int(request.form["numero"])
+
+            if not supervisor_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
+                flash("No tienes permiso para eliminar archivos en este grupo.", "error")
+                return redirect(url_for("archivo"))
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            # datos antes de borrar para log + pdf_path para borrar del disco
+            cur.execute(
+                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero, grupo_id)
+            )
+            antes = cur.fetchone()
+
             if antes:
-                caja_old, numero_old, nombre_old = antes
+                archivo_id, caja_old, numero_old, nombre_old, pdf_old = antes
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="archivo",
+                    entidad_id=archivo_id,
+                    accion="ELIMINAR_ARCHIVO",
+                    datos_antes={
+                        "id": archivo_id,
+                        "numero": numero_old,
+                        "nombre": nombre_old,
+                        "caja_id": caja_old,
+                        "pdf_path": pdf_old,
+                    },
+                )
+
+            cur.execute("DELETE FROM archivos WHERE numero = %s AND grupo_id = %s", (numero, grupo_id))
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            # borrar PDF del disco si existía
+            if antes:
+
+                if pdf_old:
+                    try:
+                        path = pdf_old
+                        if not os.path.isabs(path):
+                            path = os.path.join(app.root_path, path)
+                        if os.path.exists(path):
+                            os.remove(path)
+                    except Exception as e:
+                        print("Error eliminando PDF:", e)
+
                 registrar_log(
                     session.get("usuario_id"),
                     f"ARCHIVO|tipo=ELIMINACION|numero_old={numero_old}|nombre_old={nombre_old}|caja={caja_old}",
-                    request.remote_addr
+                    request.remote_addr,
+                    grupo_id
                 )
 
             flash("Archivo eliminado correctamente.", "success")
             return redirect(url_for("archivo"))
 
         # ---------- Modificar Archivo (desde modal de búsqueda) ----------
+        elif accion == "modificar_archivo_modal":
+            numero_old = int(request.form["numero_old"])
+            numero_new = int(request.form["numero_new"])
+            nombre_new = request.form.get("nombre_new", "").strip()
 
-    if request.method == "POST" and accion == "modificar_archivo_modal":
-        numero_old = int(request.form["numero_old"])
-        numero_new = int(request.form["numero_new"])
-        nombre_new = request.form.get("nombre_new", "").strip()
+            # checkbox para eliminar PDF actual
+            remove_pdf = request.form.get("remove_pdf") == "1"
 
-        # NUEVO: checkbox para eliminar PDF actual
-        remove_pdf = request.form.get("remove_pdf") == "1"
+            conn = get_db()
+            cur = conn.cursor()
 
-        conn = get_db()
-        cur = conn.cursor()
+            cur.execute(
+                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero_old, grupo_id)
+            )
+            antes = cur.fetchone()
 
-        cur.execute("SELECT caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s", (numero_old,))
-        antes = cur.fetchone()
-
-        if not antes:
-            cur.close()
-            conn.close()
-            flash("No se encontró el archivo a modificar.", "error")
-            return redirect(url_for("archivo"))
-
-        caja_old, numero_viejo, nombre_viejo, pdf_old = antes
-
-        # Caja destino según rangos del numero_new
-        cur.execute("""
-            SELECT id
-            FROM cajas
-            WHERE id <> 0 AND %s BETWEEN rango_min AND rango_max
-            ORDER BY rango_min, id
-            LIMIT 1
-        """, (numero_new,))
-        caja_dest = cur.fetchone()
-        caja_dest_id = caja_dest[0] if caja_dest else 0
-
-        # =========================
-        # NUEVO: eliminar PDF actual
-        # =========================
-        pdf_name = pdf_old
-
-        if remove_pdf and pdf_old:
-            try:
-                # Si pdf_old es relativo (ej: "static/pdfs/123.pdf"), lo volvemos absoluto
-                path = pdf_old
-                if not os.path.isabs(path):
-                    path = os.path.join(app.root_path, path)
-                if os.path.exists(path):
-                    os.remove(path)
-            except Exception as e:
-                print("Error eliminando PDF:", e)
-
-            pdf_name = None  # en DB quedará NULL
-
-        # =========================
-        # PDF (opcional) - reemplazo
-        # =========================
-        file = request.files.get("pdf")
-        if file and file.filename:
-            if not es_pdf(file):
+            if not antes:
                 cur.close()
                 conn.close()
-                flash("El archivo debe ser PDF.", "error")
+                flash("No se encontró el archivo a modificar.", "error")
                 return redirect(url_for("archivo"))
 
-            # Si había PDF anterior y no fue eliminado arriba, lo borramos (para evitar basura)
-            if pdf_old and not remove_pdf:
+            archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old = antes
+
+            # Caja destino según rangos del numero_new
+            cur.execute("""
+                SELECT id
+                FROM cajas
+                WHERE grupo_id = %s
+                  AND is_pendiente = FALSE
+                  AND %s BETWEEN rango_min AND rango_max
+                ORDER BY rango_min, id
+                LIMIT 1
+            """, (grupo_id, numero_new))
+            caja_dest = cur.fetchone()
+            caja_dest_id = caja_dest[0] if caja_dest else asegurar_caja_sin_asignar(grupo_id)
+
+            pdf_name = pdf_old
+
+            # 1) eliminar PDF actual si se pidió
+            if remove_pdf and pdf_old:
                 try:
-                    old_path = pdf_old
-                    if not os.path.isabs(old_path):
-                        old_path = os.path.join(app.root_path, old_path)
-                    if os.path.exists(old_path):
-                        os.remove(old_path)
+                    path = pdf_old
+                    if not os.path.isabs(path):
+                        path = os.path.join(app.root_path, path)
+                    if os.path.exists(path):
+                        os.remove(path)
                 except Exception as e:
-                    print("Error eliminando PDF anterior:", e)
+                    print("Error eliminando PDF:", e)
 
-            # Guardar nuevo PDF (tu función)
-            pdf_name = guardar_pdf(file, numero_new)
+                pdf_name = None  # queda NULL en DB
 
-        # Update
-        cur.execute("""
-            UPDATE archivos
-            SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s
-            WHERE numero = %s
-        """, (numero_new, nombre_new, caja_dest_id, pdf_name, numero_old))
+            # 2) subir PDF nuevo (reemplazo)
+            file = request.files.get("pdf")
+            if file and file.filename:
+                if not es_pdf(file):
+                    cur.close()
+                    conn.close()
+                    flash("El archivo debe ser PDF.", "error")
+                    return redirect(url_for("archivo"))
 
-        conn.commit()
-        cur.close()
-        conn.close()
+                # si había anterior y no se eliminó arriba, lo borramos
+                if pdf_old and not remove_pdf:
+                    try:
+                        old_path = pdf_old
+                        if not os.path.isabs(old_path):
+                            old_path = os.path.join(app.root_path, old_path)
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                    except Exception as e:
+                        print("Error eliminando PDF anterior:", e)
 
-        registrar_log(
-            session.get("usuario_id"),
-            f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|"
-            f"nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_dest_id}|"
-            f"pdf_eliminado={1 if (remove_pdf and pdf_old) else 0}|pdf_nuevo={1 if (file and file.filename) else 0}",
-            request.remote_addr
-        )
+                pdf_name = guardar_pdf(file, numero_new, grupo_id)
 
-        flash("Archivo modificado correctamente.", "success")
-        return redirect(url_for("archivo"))
+            # 3) update final
+            cur.execute("""
+                UPDATE archivos
+                SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s
+                WHERE numero = %s AND grupo_id = %s
+            """, (numero_new, nombre_new, caja_dest_id, pdf_name, numero_old, grupo_id))
 
+            conn.commit()
+            cur.close()
+            conn.close()
 
+            registrar_log(
+                session.get("usuario_id"),
+                f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|"
+                f"nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_dest_id}|"
+                f"pdf_eliminado={1 if (remove_pdf and pdf_old) else 0}|pdf_nuevo={1 if (file and file.filename) else 0}",
+                request.remote_addr,
+                grupo_id
+            )
 
-    # ===== GET: listado de cajas =====
-    conn = get_db()
-    cur = conn.cursor()
+            registrar_movimiento(
+                session.get("usuario_id"),
+                grupo_id,
+                entidad="archivo",
+                entidad_id=archivo_id,
+                accion="MODIFICAR_ARCHIVO",
+                datos_antes={
+                    "numero": numero_viejo,
+                    "nombre": nombre_viejo,
+                    "caja_id": caja_old,
+                    "pdf_path": pdf_old,
+                },
+                datos_despues={
+                    "numero": numero_new,
+                    "nombre": nombre_new,
+                    "caja_id": caja_dest_id,
+                    "pdf_path": pdf_name,
+                },
+            )
 
-    cur.execute("""
-        WITH ranked AS (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
-            FROM cajas
-            WHERE id <> 0
-        )
-        SELECT
-            c.id AS caja_id,
-            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
-            c.rango_min,
-            c.rango_max,
-            COUNT(a.id) AS total_archivos
-        FROM cajas c
-        LEFT JOIN archivos a ON a.caja_id = c.id
-        LEFT JOIN ranked r ON r.id = c.id
-        GROUP BY c.id, r.caja_visible, c.rango_min, c.rango_max
-        ORDER BY
-            CASE WHEN c.id = 0 THEN 1 ELSE 0 END,
-            caja_num
-    """)
+            flash("Archivo modificado correctamente.", "success")
+            return redirect(url_for("archivo"))
 
-    cajas_data = cur.fetchall()
+        # Acción desconocida
+        else:
+            flash("Acción no reconocida.", "error")
+            return redirect(url_for("archivo"))
 
-    cajas_filtradas = [c for c in cajas_data if not (c[0] == 0 and c[4] == 0)]
-
-    # ===== Buscador para modal =====
-        # Buscador
-        # ===== Buscador para modal =====
+    # =========================================================
+    # GET: buscador + listado de cajas
+    # =========================================================
     resultado = None
     buscar_raw = request.args.get("buscar", "").strip()
 
     if buscar_raw:
+        conn = get_db()
+        cur = conn.cursor()
         try:
             doc = int(buscar_raw)
 
@@ -752,20 +1357,20 @@ def archivo():
                 WITH ranked AS (
                     SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
                     FROM cajas
-                    WHERE id <> 0
+                    WHERE grupo_id = %s AND is_pendiente = FALSE
                 )
                 SELECT
                     c.id AS caja_id,
-                    CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
                     a.numero AS documento,
                     a.nombre AS nombre,
                     a.pdf_path
                 FROM archivos a
                 JOIN cajas c ON c.id = a.caja_id
                 LEFT JOIN ranked r ON r.id = c.id
-                WHERE a.numero = %s
+                WHERE a.numero = %s AND a.grupo_id = %s
                 LIMIT 1
-            """, (doc,))
+            """, (grupo_id, doc, grupo_id))
 
             row = cur.fetchone()
             if row:
@@ -774,16 +1379,75 @@ def archivo():
                 resultado = ("no",)
 
         except ValueError:
-            resultado = ("error", buscar_raw)
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                    FROM cajas
+                    WHERE grupo_id = %s AND is_pendiente = FALSE
+                )
+                SELECT
+                    c.id AS caja_id,
+                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                    a.numero AS documento,
+                    a.nombre AS nombre,
+                    a.pdf_path
+                FROM archivos a
+                JOIN cajas c ON c.id = a.caja_id
+                LEFT JOIN ranked r ON r.id = c.id
+                WHERE a.nombre ILIKE %s AND a.grupo_id = %s
+                ORDER BY a.numero
+                LIMIT 1
+            """, (grupo_id, f"%{buscar_raw}%", grupo_id))
+            row = cur.fetchone()
+            if row:
+                resultado = row
+            else:
+                resultado = ("no",)
+        finally:
+            cur.close()
+            conn.close()
 
+    # listado de cajas (como ya lo tienes)
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        WITH ranked AS (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE grupo_id = %s AND is_pendiente = FALSE
+        ),
+        conteo AS (
+            SELECT caja_id, COUNT(*) AS total_archivos
+            FROM archivos
+            WHERE grupo_id = %s
+            GROUP BY caja_id
+        )
+        SELECT
+            c.id,
+            CASE
+            WHEN c.is_pendiente THEN 0
+            ELSE r.caja_visible
+            END AS caja_num,
+            c.rango_min,
+            c.rango_max,
+            COALESCE(ct.total_archivos, 0) AS total_archivos,
+            c.is_pendiente
+        FROM cajas c
+        LEFT JOIN conteo ct ON ct.caja_id = c.id
+        LEFT JOIN ranked r ON r.id = c.id
+        WHERE c.grupo_id = %s AND (c.is_pendiente = FALSE OR COALESCE(ct.total_archivos, 0) > 0)
+        ORDER BY CASE WHEN c.is_pendiente THEN 1 ELSE 0 END, c.rango_min, c.id
+    """, (grupo_id, grupo_id, grupo_id))
 
+    cajas = cur.fetchall()
     cur.close()
     conn.close()
 
     return render_template(
         "archivo_dashboard.html",
-        cajas=cajas_filtradas,
-        resultado=resultado
+        cajas=cajas,
+        resultado=resultado,
+        archivador_mode=archivador_mode
     )
 
 # ---------------- archivo_caja ----------------
@@ -793,7 +1457,11 @@ def archivo_caja(caja_id):
     if not login_requerido():
         return redirect(url_for("login"))
 
-    asegurar_caja_sin_asignar()
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    asegurar_caja_sin_asignar(grupo_id)
 
     # ======================
     # POST: Acciones en esta caja
@@ -806,17 +1474,26 @@ def archivo_caja(caja_id):
             nuevo_min = int(request.form["rango_min"])
             nuevo_max = int(request.form["rango_max"])
 
-            modificar_caja(caja_id, nuevo_min, nuevo_max)
+            if not admin_requerido():
+                flash("Solo el admin puede modificar cajas.", "error")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+            modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
 
             # Reubicar archivos según nuevo rango
-            movidos_fuera = reubicar_archivos_de_caja(caja_id)
-            movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(caja_id)
+            movidos_fuera = reubicar_archivos_de_caja(caja_id, grupo_id, session.get("usuario_id"))
+            movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(
+                caja_id,
+                grupo_id,
+                session.get("usuario_id")
+            )
             total = movidos_fuera + movidos_dentro
 
             registrar_log(
                 session.get("usuario_id"),
                 f"MODIFICAR_CAJA caja_id={caja_id} rango={nuevo_min}-{nuevo_max} reasignados={total}",
-                request.remote_addr
+                request.remote_addr,
+                grupo_id
             )
 
             if total > 0:
@@ -826,29 +1503,75 @@ def archivo_caja(caja_id):
 
             return redirect(url_for("archivo_caja", caja_id=caja_id))
 
+        # ---------- ELIMINAR CAJA ----------
+        if accion == "eliminar_caja":
+            if not admin_requerido():
+                flash("Solo el admin puede eliminar cajas.", "error")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+            if not admin_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
+                flash("No tienes permiso para eliminar cajas en este grupo.", "error")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+            eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"ELIMINAR_CAJA caja_id={caja_id}",
+                request.remote_addr,
+                grupo_id
+            )
+
+            flash("Caja eliminada correctamente.", "success")
+            return redirect(url_for("archivo"))
+
         # ---------- ELIMINAR ARCHIVO ----------
         if accion == "eliminar_archivo_fila":
             numero = int(request.form["numero"])
+
+            if not supervisor_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
+                flash("No tienes permiso para eliminar archivos en este grupo.", "error")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             conn = get_db()
             cur = conn.cursor()
 
             # obtener datos antes de borrar (para log)
-            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero,))
+            cur.execute(
+                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero, grupo_id)
+            )
             antes = cur.fetchone()
 
-            cur.execute("DELETE FROM archivos WHERE numero = %s", (numero,))
+            if antes:
+                archivo_id, caja_old, numero_old, nombre_old, pdf_old = antes
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="archivo",
+                    entidad_id=archivo_id,
+                    accion="ELIMINAR_ARCHIVO",
+                    datos_antes={
+                        "id": archivo_id,
+                        "numero": numero_old,
+                        "nombre": nombre_old,
+                        "caja_id": caja_old,
+                        "pdf_path": pdf_old,
+                    },
+                )
+
+            cur.execute("DELETE FROM archivos WHERE numero = %s AND grupo_id = %s", (numero, grupo_id))
             conn.commit()
 
             cur.close()
             conn.close()
 
             if antes:
-                caja_old, numero_old, nombre_old = antes
                 registrar_log(
                     session.get("usuario_id"),
                     f"ARCHIVO|tipo=ELIMINACION|numero_old={numero_old}|nombre_old={nombre_old}|caja={caja_old}",
-                    request.remote_addr
+                    request.remote_addr,
+                    grupo_id
                 )
 
             flash("Archivo eliminado correctamente.", "success")
@@ -856,66 +1579,110 @@ def archivo_caja(caja_id):
 
         # ---------- MODIFICAR ARCHIVO (numero y/o nombre) ----------
         if accion == "modificar_archivo_fila":
+            import os
+
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
             nombre_new = request.form.get("nombre_new", "").strip()
 
+            remove_pdf = request.form.get("remove_pdf") == "1"
+            file = request.files.get("pdf")
+
             conn = get_db()
             cur = conn.cursor()
 
-            # datos anteriores
-            cur.execute("SELECT caja_id, numero, nombre FROM archivos WHERE numero = %s", (numero_old,))
-            antes = cur.fetchone()
-
-            if not antes:
+            # Traer estado actual
+            cur.execute(
+                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero_old, grupo_id)
+            )
+            row = cur.fetchone()
+            if not row:
                 cur.close()
                 conn.close()
-                flash("No se encontró el archivo a modificar.", "error")
+                flash("No se encontro el archivo a modificar.", "error")
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
-            caja_old, numero_viejo, nombre_viejo = antes
+            archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old = row
 
-            # decidir caja destino según rangos actuales
-            cur.execute("""
-                SELECT id
-                FROM cajas
-                WHERE id <> 0 AND %s BETWEEN rango_min AND rango_max
-                ORDER BY rango_min, id
-                LIMIT 1
-            """, (numero_new,))
-            caja_dest = cur.fetchone()
-            caja_dest_id = caja_dest[0] if caja_dest else 0
+            pdf_name = pdf_old
 
-            # actualizar
+            # 🗑️ Eliminar PDF actual
+            if remove_pdf and pdf_old:
+                try:
+                    path = pdf_old
+                    if not os.path.isabs(path):
+                        path = os.path.join(app.root_path, path)
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception as e:
+                    print("Error eliminando PDF:", e)
+
+                pdf_name = None
+
+            # 📄 Reemplazar / subir PDF nuevo
+            if file and file.filename:
+                if not es_pdf(file):
+                    cur.close()
+                    conn.close()
+                    flash("El archivo debe ser PDF.", "error")
+                    return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+                # borrar anterior si existía
+                if pdf_old and not remove_pdf:
+                    try:
+                        old_path = pdf_old
+                        if not os.path.isabs(old_path):
+                            old_path = os.path.join(app.root_path, old_path)
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                    except Exception as e:
+                        print("Error eliminando PDF anterior:", e)
+
+                pdf_name = guardar_pdf(file, numero_new, grupo_id)
+
+            # Update final
             cur.execute("""
                 UPDATE archivos
-                SET numero = %s, nombre = %s, caja_id = %s
-                WHERE numero = %s
-            """, (numero_new, nombre_new, caja_dest_id, numero_old))
+                SET numero = %s,
+                    nombre = %s,
+                    pdf_path = %s
+                WHERE numero = %s AND grupo_id = %s
+            """, (numero_new, nombre_new, pdf_name, numero_old, grupo_id))
 
             conn.commit()
             cur.close()
             conn.close()
-
-            registrar_log(
+            
+            registrar_movimiento(
                 session.get("usuario_id"),
-                f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_dest_id}",
-                request.remote_addr
+                grupo_id,
+                entidad="archivo",
+                entidad_id=archivo_id,
+                accion="MODIFICAR_ARCHIVO",
+                datos_antes={
+                    "numero": numero_viejo,
+                    "nombre": nombre_viejo,
+                    "caja_id": caja_old,
+                    "pdf_path": pdf_old,
+                },
+                datos_despues={
+                    "numero": numero_new,
+                    "nombre": nombre_new,
+                    "caja_id": caja_old,
+                    "pdf_path": pdf_name,
+                },
             )
 
             flash("Archivo modificado correctamente.", "success")
-
-            # si el archivo cambió de caja, llévalo a la nueva caja
-            if caja_dest_id != caja_id:
-                return redirect(url_for("archivo_caja", caja_id=caja_dest_id))
             return redirect(url_for("archivo_caja", caja_id=caja_id))
-
-        flash("Acción no válida.", "error")
-        return redirect(url_for("archivo_caja", caja_id=caja_id))
 
     # ======================
     # GET: Render de la caja + archivos
     # ======================
+    highlight_raw = request.args.get("highlight", "").strip()
+    highlight_num = int(highlight_raw) if highlight_raw.isdigit() else None
+
     conn = get_db()
     cur = conn.cursor()
 
@@ -924,17 +1691,17 @@ def archivo_caja(caja_id):
         WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
-            WHERE id <> 0
+            WHERE grupo_id = %s AND is_pendiente = FALSE
         )
         SELECT
             c.id,
-            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
             c.rango_min,
             c.rango_max
         FROM cajas c
         LEFT JOIN ranked r ON r.id = c.id
-        WHERE c.id = %s
-    """, (caja_id,))
+        WHERE c.id = %s AND c.grupo_id = %s
+    """, (grupo_id, caja_id, grupo_id))
     caja_info = cur.fetchone()
 
     if not caja_info:
@@ -943,19 +1710,24 @@ def archivo_caja(caja_id):
         flash("La caja no existe.", "error")
         return redirect(url_for("archivo"))
 
-    # archivos de la caja
+    # archivos de la caja (incluye pdf_path para habilitar Ver PDF)
     cur.execute("""
-        SELECT a.numero, a.nombre
+        SELECT a.numero, a.nombre, a.pdf_path
         FROM archivos a
-        WHERE a.caja_id = %s
+        WHERE a.caja_id = %s AND a.grupo_id = %s
         ORDER BY a.numero
-    """, (caja_id,))
+    """, (caja_id, grupo_id))
     archivos = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    return render_template("archivo_caja.html", caja=caja_info, archivos=archivos)
+    return render_template(
+        "archivo_caja.html",
+        caja=caja_info,
+        archivos=archivos,
+        highlight_num=highlight_num
+    )
 
 
 # ---------------- ADMIN: LOGS ----------------
@@ -971,24 +1743,420 @@ def admin_logs():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT u.usuario, l.accion, l.fecha, l.ip
+        SELECT u.usuario, l.accion, l.fecha, l.ip, g.nombre, l.grupo_id
         FROM logs l
         JOIN usuarios u ON u.id = l.usuario_id
+        LEFT JOIN grupos g ON g.id = l.grupo_id
         ORDER BY l.fecha DESC
         LIMIT 200
     """)
 
     registros = cur.fetchall()
 
+    cur.execute("""
+        SELECT
+            m.id,
+            m.fecha,
+            u.usuario,
+            g.nombre,
+            m.entidad,
+            m.accion,
+            m.datos_antes,
+            m.datos_despues,
+            m.grupo_id,
+            m.entidad_id
+        FROM movimientos m
+        JOIN usuarios u ON u.id = m.usuario_id
+        LEFT JOIN grupos g ON g.id = m.grupo_id
+        ORDER BY m.fecha DESC
+        LIMIT 200
+    """)
+    movimientos = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            u.id,
+            u.usuario,
+            u.rol,
+            u.creado_en,
+            COALESCE(string_agg(g.nombre, ', ' ORDER BY g.nombre), 'Sin grupo') AS grupos,
+            COALESCE(array_agg(g.id ORDER BY g.id), ARRAY[]::integer[]) AS grupo_ids
+        FROM usuarios u
+        LEFT JOIN usuarios_grupos ug ON ug.usuario_id = u.id
+        LEFT JOIN grupos g ON g.id = ug.grupo_id AND g.archivado = FALSE
+        GROUP BY u.id, u.usuario, u.rol, u.creado_en
+        ORDER BY u.creado_en DESC
+    """)
+    usuarios = cur.fetchall()
+
+    cur.execute("""
+        SELECT id, nombre
+        FROM grupos
+        WHERE archivado = FALSE
+        ORDER BY nombre
+    """)
+    grupos_todos = cur.fetchall()
+
     cur.close()
     conn.close()
 
-    return render_template("admin_logs.html", registros=registros)
+    return render_template(
+        "admin_logs.html",
+        registros=registros,
+        movimientos=movimientos,
+        usuarios=usuarios,
+        grupos_todos=grupos_todos
+    )
+
+
+# ---------------- ADMIN: GRUPOS ----------------
+@app.route("/admin/grupos", methods=["GET", "POST"])
+def admin_grupos():
+    return redirect(url_for("grupos"))
+
+
+@app.route("/admin/grupos/abrir/<int:grupo_id>")
+def admin_abrir_grupo(grupo_id):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    if not admin_requerido():
+        return "Acceso denegado", 403
+
+    session["grupo_id"] = grupo_id
+    return redirect(url_for("archivo"))
+
+
+# ---------------- ADMIN: MOVIMIENTOS ----------------
+@app.route("/admin/movimientos")
+def admin_movimientos():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    if not admin_requerido():
+        return "Acceso denegado", 403
+
+    return redirect(url_for("admin_logs"))
+
+
+@app.route("/admin/movimientos/<int:mov_id>/deshacer", methods=["POST"])
+def deshacer_movimiento(mov_id):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    if not admin_requerido():
+        return "Acceso denegado", 403
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT entidad, accion, datos_antes, datos_despues, grupo_id, entidad_id
+        FROM movimientos
+        WHERE id = %s
+    """, (mov_id,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close()
+        conn.close()
+        flash("Movimiento no encontrado.", "error")
+        return redirect(url_for("admin_movimientos"))
+
+    entidad, accion, datos_antes, datos_despues, grupo_id, entidad_id = row
+
+    try:
+        if entidad == "archivo":
+            if accion == "CREAR_ARCHIVO":
+                cur.execute(
+                    "DELETE FROM archivos WHERE id = %s AND grupo_id = %s",
+                    (entidad_id, grupo_id)
+                )
+            elif accion == "ELIMINAR_ARCHIVO" and datos_antes:
+                cur.execute(
+                    """
+                    INSERT INTO archivos (id, numero, nombre, caja_id, pdf_path, grupo_id, creado_por)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (
+                        datos_antes.get("id"),
+                        datos_antes.get("numero"),
+                        datos_antes.get("nombre"),
+                        datos_antes.get("caja_id"),
+                        datos_antes.get("pdf_path"),
+                        grupo_id,
+                        None,
+                    )
+                )
+            elif accion == "ARCHIVO_MOVER" and datos_antes:
+                cur.execute(
+                    "UPDATE archivos SET caja_id = %s WHERE id = %s AND grupo_id = %s",
+                    (datos_antes.get("caja_id"), entidad_id, grupo_id)
+                )
+            elif accion == "MODIFICAR_ARCHIVO" and datos_antes:
+                cur.execute(
+                    """
+                    UPDATE archivos
+                    SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s
+                    WHERE id = %s AND grupo_id = %s
+                    """,
+                    (
+                        datos_antes.get("numero"),
+                        datos_antes.get("nombre"),
+                        datos_antes.get("caja_id"),
+                        datos_antes.get("pdf_path"),
+                        entidad_id,
+                        grupo_id,
+                    )
+                )
+
+        if entidad == "caja":
+            if accion == "CREAR_CAJA":
+                cur.execute(
+                    "DELETE FROM cajas WHERE id = %s AND grupo_id = %s",
+                    (entidad_id, grupo_id)
+                )
+            elif accion == "ELIMINAR_CAJA" and datos_antes:
+                cur.execute(
+                    """
+                    INSERT INTO cajas (id, rango_min, rango_max, grupo_id, is_pendiente)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (
+                        entidad_id,
+                        datos_antes.get("rango_min"),
+                        datos_antes.get("rango_max"),
+                        grupo_id,
+                    )
+                )
+            elif accion == "MODIFICAR_CAJA" and datos_antes:
+                cur.execute(
+                    """
+                    UPDATE cajas
+                    SET rango_min = %s, rango_max = %s
+                    WHERE id = %s AND grupo_id = %s
+                    """,
+                    (
+                        datos_antes.get("rango_min"),
+                        datos_antes.get("rango_max"),
+                        entidad_id,
+                        grupo_id,
+                    )
+                )
+
+        conn.commit()
+        flash("Movimiento deshecho.", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Error al deshacer: {e}", "error")
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("admin_movimientos"))
+
+
+# ---------------- ARCHIVADOR: TRANSFERIR ----------------
+@app.route("/archivador/transferir", methods=["POST"])
+def archivador_transferir():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not admin_requerido() or not es_archivador_grupo(grupo_id):
+        return "Acceso denegado", 403
+
+    cajas_ids_raw = request.form.get("cajas_ids", "")
+    archivos_ids_raw = request.form.get("archivos_ids", "")
+    grupo_destino = int(request.form.get("grupo_destino"))
+
+    if es_archivador_grupo(grupo_destino):
+        flash("No puedes mover elementos al Archivador.", "error")
+        return redirect(url_for("archivo") + "?view=especial")
+
+    cajas_ids = [int(x) for x in cajas_ids_raw.split(",") if x.strip().isdigit()]
+    archivos_ids = [int(x) for x in archivos_ids_raw.split(",") if x.strip().isdigit()]
+
+    if not cajas_ids and not archivos_ids:
+        flash("No hay elementos seleccionados.", "error")
+        return redirect(url_for("archivo") + "?view=especial")
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    pendientes_id = asegurar_caja_sin_asignar(grupo_destino)
+    warnings = []
+    moved_file_ids = set()
+
+    # Mover cajas completas
+    for caja_id in cajas_ids:
+        cur.execute(
+            """
+            SELECT rango_min, rango_max, is_pendiente
+            FROM cajas
+            WHERE id = %s AND grupo_id = %s
+            """,
+            (caja_id, grupo_id)
+        )
+        row = cur.fetchone()
+        if not row:
+            continue
+
+        rmin, rmax, is_pendiente = row
+        if is_pendiente:
+            warnings.append(f"Caja {caja_id} es pendiente y no se movio.")
+            continue
+
+        # Aviso de solapamiento de rangos en destino
+        cur.execute(
+            """
+            SELECT id, rango_min, rango_max
+            FROM cajas
+            WHERE grupo_id = %s
+              AND is_pendiente = FALSE
+              AND NOT (rango_max < %s OR rango_min > %s)
+            """,
+            (grupo_destino, rmin, rmax)
+        )
+        overlaps = cur.fetchall()
+        if overlaps:
+            warnings.append(
+                f"Caja {caja_id} tiene solapamiento de rango en grupo destino."
+            )
+
+        cur.execute(
+            """
+            UPDATE cajas
+            SET grupo_id = %s,
+                grupo_origen_id = COALESCE(grupo_origen_id, %s)
+            WHERE id = %s
+            """,
+            (grupo_destino, grupo_id, caja_id)
+        )
+
+        cur.execute(
+            """
+            UPDATE archivos
+            SET grupo_id = %s,
+                grupo_origen_id = COALESCE(grupo_origen_id, %s)
+            WHERE caja_id = %s
+            """,
+            (grupo_destino, grupo_id, caja_id)
+        )
+
+        cur.execute("SELECT id FROM archivos WHERE caja_id = %s", (caja_id,))
+        moved_file_ids.update([r[0] for r in cur.fetchall()])
+
+    # Mover archivos sueltos
+    for archivo_id in archivos_ids:
+        if archivo_id in moved_file_ids:
+            continue
+
+        cur.execute(
+            "SELECT numero FROM archivos WHERE id = %s AND grupo_id = %s",
+            (archivo_id, grupo_id)
+        )
+        row = cur.fetchone()
+        if not row:
+            continue
+
+        numero = row[0]
+        cur.execute(
+            """
+            SELECT id
+            FROM cajas
+            WHERE grupo_id = %s
+              AND is_pendiente = FALSE
+              AND %s BETWEEN rango_min AND rango_max
+            ORDER BY rango_min, id
+            LIMIT 1
+            """,
+            (grupo_destino, numero)
+        )
+        dest = cur.fetchone()
+        dest_caja = dest[0] if dest else pendientes_id
+
+        cur.execute(
+            """
+            UPDATE archivos
+            SET grupo_id = %s,
+                caja_id = %s,
+                grupo_origen_id = COALESCE(grupo_origen_id, %s)
+            WHERE id = %s
+            """,
+            (grupo_destino, dest_caja, grupo_id, archivo_id)
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if warnings:
+        flash("Aviso: " + " | ".join(warnings), "info")
+    else:
+        flash("Elementos movidos correctamente.", "success")
+
+    return redirect(url_for("archivo") + "?view=especial")
+
+
+# ---------------- ARCHIVADOR: ELIMINAR ----------------
+@app.route("/archivador/eliminar", methods=["POST"])
+def archivador_eliminar():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not admin_requerido() or not es_archivador_grupo(grupo_id):
+        return "Acceso denegado", 403
+
+    cajas_ids_raw = request.form.get("cajas_ids", "")
+    archivos_ids_raw = request.form.get("archivos_ids", "")
+
+    cajas_ids = [int(x) for x in cajas_ids_raw.split(",") if x.strip().isdigit()]
+    archivos_ids = [int(x) for x in archivos_ids_raw.split(",") if x.strip().isdigit()]
+
+    if not cajas_ids and not archivos_ids:
+        flash("No hay elementos seleccionados.", "error")
+        return redirect(url_for("archivo") + "?view=especial")
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Eliminar archivos sueltos (que no esten en cajas seleccionadas)
+    if archivos_ids:
+        cur.execute(
+            "DELETE FROM archivos WHERE id = ANY(%s) AND grupo_id = %s",
+            (archivos_ids, grupo_id)
+        )
+
+    # Eliminar cajas y sus archivos
+    for caja_id in cajas_ids:
+        cur.execute(
+            "DELETE FROM archivos WHERE caja_id = %s AND grupo_id = %s",
+            (caja_id, grupo_id)
+        )
+        cur.execute(
+            "DELETE FROM cajas WHERE id = %s AND grupo_id = %s",
+            (caja_id, grupo_id)
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Elementos eliminados permanentemente.", "success")
+    return redirect(url_for("archivo") + "?view=especial")
 
 @app.route("/export/excel")
 def export_excel():
     if not login_requerido():
         return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
 
     conn = get_db()
     cur = conn.cursor()
@@ -999,7 +2167,7 @@ def export_excel():
             SELECT id, rango_min, rango_max,
                    ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
-            WHERE id <> 0
+            WHERE grupo_id = %s AND is_pendiente = FALSE
         )
         SELECT
             r.caja_visible AS caja_num,
@@ -1007,16 +2175,18 @@ def export_excel():
             r.rango_max,
             COALESCE(COUNT(a.id),0) AS total_archivos
         FROM ranked r
-        LEFT JOIN archivos a ON a.caja_id = r.id
+        LEFT JOIN archivos a ON a.caja_id = r.id AND a.grupo_id = %s
         GROUP BY r.caja_visible, r.rango_min, r.rango_max
         ORDER BY r.caja_visible
     """)
     cajas = cur.fetchall()
 
-    # Caja 0 (solo si tiene archivos)
-    cur.execute("""
-        SELECT COUNT(*) FROM archivos WHERE caja_id = 0
-    """)
+    # Caja pendiente (solo si tiene archivos)
+    pendiente_id = asegurar_caja_sin_asignar(grupo_id)
+    cur.execute(
+        "SELECT COUNT(*) FROM archivos WHERE caja_id = %s AND grupo_id = %s",
+        (pendiente_id, grupo_id)
+    )
     total_caja0 = cur.fetchone()[0]
 
     # ===== 2) HOJA ARCHIVOS (caja_visible, documento, nombre, pdf si/no) =====
@@ -1024,18 +2194,19 @@ def export_excel():
         WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
-            WHERE id <> 0
+            WHERE grupo_id = %s AND is_pendiente = FALSE
         )
         SELECT
-            CASE WHEN c.id = 0 THEN 0 ELSE r.caja_visible END AS caja_num,
+            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
             a.numero,
             a.nombre,
-            CASE WHEN a.pdf_path IS NULL OR a.pdf_path = '' THEN 'No' ELSE 'Sí' END AS pdf
+            CASE WHEN a.pdf_path IS NULL OR a.pdf_path = '' THEN 'No' ELSE 'Si' END AS pdf
         FROM archivos a
         JOIN cajas c ON c.id = a.caja_id
         LEFT JOIN ranked r ON r.id = c.id
+        WHERE a.grupo_id = %s
         ORDER BY caja_num, a.numero
-    """)
+    """, (grupo_id, grupo_id))
     archivos = cur.fetchall()
 
     cur.close()
@@ -1098,9 +2269,16 @@ def ver_pdf(numero):
     if not login_requerido():
         return redirect(url_for("login"))
 
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT pdf_path FROM archivos WHERE numero = %s", (numero,))
+    cur.execute(
+        "SELECT pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+        (numero, grupo_id)
+    )
     row = cur.fetchone()
     cur.close()
     conn.close()
@@ -1110,7 +2288,7 @@ def ver_pdf(numero):
         return "No hay PDF para este documento.", 404
 
     filename = row[0]
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=True)
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=False)
 
 if __name__ == "__main__":
     app.run(debug=True)

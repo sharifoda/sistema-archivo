@@ -49,8 +49,10 @@ function cerrarModal(tipo, limpiarBuscar = false) {
 /* =========================
    URLs dinámicas
    ========================= */
-function buildCajaUrl(cajaId) {
-  return URL_CAJA_BASE.replace("/0", "/" + String(cajaId));
+function buildCajaUrl(cajaId, highlightDoc) {
+  const base = URL_CAJA_BASE.replace("/0", "/" + String(cajaId));
+  if (!highlightDoc) return base;
+  return base + "?highlight=" + encodeURIComponent(String(highlightDoc));
 }
 
 function buildPdfUrl(doc) {
@@ -131,10 +133,10 @@ if (resultado) {
         ? "<strong>0</strong> (Pendiente)"
         : BUSQ.cajaNum;
 
-    const irCajaUrl = buildCajaUrl(BUSQ.cajaId);
+    const irCajaUrl = buildCajaUrl(BUSQ.cajaId, BUSQ.doc);
 
     const pdfLink = BUSQ.pdf
-      ? `<a class="btn-small" href="${buildPdfUrl(BUSQ.doc)}">📄 Ver PDF</a>`
+      ? `<a class="btn-small" href="${buildPdfUrl(BUSQ.doc)}" target="_blank" rel="noopener">📄 Ver PDF</a>`
       : `<button type="button" class="btn-small btn-disabled"
            onclick="alert('Este documento no tiene PDF.');">
            📄 Ver PDF

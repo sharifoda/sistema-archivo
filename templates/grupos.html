@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 999;
+  }
+  .modal {
+    width: min(720px, 92vw);
+    background: white;
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    display: none;
+  }
+  .modal h4 { margin: 0 0 10px; }
+  .modal .actions { display:flex; justify-content:flex-end; margin-top: 12px; }
+</style>
+
+{% if es_admin %}
+<h2>Empresas</h2>
+{% else %}
+<h2>{{ empresa_nombre }}</h2>
+{% endif %}
+
+{% if es_admin %}
+  <h3>Crear empresa</h3>
+  <form method="post">
+    <input type="hidden" name="accion" value="crear_grupo">
+    <input type="text" name="nombre" placeholder="Nombre de la empresa" required>
+    <button type="submit">Crear</button>
+  </form>
+  <hr>
+
+  <h3>Crear usuario</h3>
+  <form method="post">
+    <input type="hidden" name="accion" value="crear_usuario">
+    <input type="text" name="usuario" placeholder="Usuario" required>
+    <input type="password" name="password" placeholder="Contrasena" required>
+    <select name="rol">
+      <option value="usuario">Usuario</option>
+      <option value="supervisor">Supervisor</option>
+      <option value="admin">Admin</option>
+    </select>
+    <button type="submit">Crear</button>
+  </form>
+  <hr>
+{% endif %}
+
+{% if grupos and grupos|length > 0 %}
+{% set miembros = [] %}
+{% if not es_admin %}
+  {% set miembros = grupos[0][4] %}
+{% endif %}
+<table border="1" cellpadding="8" cellspacing="0">
+  <tr>
+    {% if es_admin %}
+      <th>Empresa</th>
+      <th>Accion</th>
+    {% else %}
+      <th>Usuario</th>
+      <th>Permisos del usuario</th>
+      <th>Ultima conexion</th>
+    {% endif %}
+  </tr>
+  {% if es_admin %}
+  {% for g in grupos %}
+  <tr>
+    {% if es_admin %}
+      <td>{{ g[1] }}</td>
+      <td>
+        <button type="button" onclick="abrirModal('{{ g[0] }}')">Modificar</button>
+        <a href="{{ url_for('admin_abrir_grupo', grupo_id=g[0]) }}">Ver contenido</a>
+        <form method="post" style="display:inline;" onsubmit="return confirm('¿Seguro que deseas eliminar este grupo?');">
+          <input type="hidden" name="accion" value="eliminar_grupo">
+          <input type="hidden" name="grupo_id" value="{{ g[0] }}">
+          <button type="submit">Eliminar</button>
+        </form>
+      </td>
+    {% else %}
+      <td>
+        {% if g[4] and g[4]|length > 0 %}
+          {% for m in g[4] %}
+            <div class="user-item">{{ m[1] }}</div>
+          {% endfor %}
+        {% else %}
+          Sin integrantes
+        {% endif %}
+      </td>
+      <td>
+        {% if g[4] and g[4]|length > 0 %}
+          {% for m in g[4] %}
+            <div class="user-item">
+              {% if m[2] %}Eliminar{% else %}Sin eliminar{% endif %}
+              /
+              {% if m[3] %}Editar{% else %}Sin editar{% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          -
+        {% endif %}
+      </td>
+      <td>
+        {% if g[4] and g[4]|length > 0 %}
+          {% for m in g[4] %}
+            <div class="user-item">{{ m[4] or "-" }}</div>
+          {% endfor %}
+        {% else %}
+          -
+        {% endif %}
+      </td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  {% endif %}
+  {% if not es_admin %}
+    {% if miembros and miembros|length > 0 %}
+      {% for m in miembros %}
+      <tr>
+        <td>{{ m[1] }}</td>
+        <td>
+          {% if m[2] %}Eliminar{% else %}Sin eliminar{% endif %}
+          /
+          {% if m[3] %}Editar{% else %}Sin editar{% endif %}
+        </td>
+        <td>{{ m[4] or "-" }}</td>
+      </tr>
+      {% endfor %}
+    {% else %}
+      <tr>
+        <td colspan="3">Sin integrantes</td>
+      </tr>
+    {% endif %}
+  {% endif %}
+</table>
+{% else %}
+<p>No hay empresas disponibles.</p>
+{% endif %}
+
+{% if es_admin %}
+  {% for g in grupos %}
+  <div class="modal-overlay" id="overlay-{{ g[0] }}"></div>
+  <div class="modal" id="modal-{{ g[0] }}">
+    <h4>Modificar empresa: {{ g[1] }}</h4>
+
+    <h5>Integrantes</h5>
+    {% if g[2] and g[2]|length > 0 %}
+    <table border="1" cellpadding="6" cellspacing="0" style="width:100%;">
+      <tr>
+        <th>Usuario</th>
+        <th>Eliminar</th>
+        <th>Editar</th>
+        <th>Guardar</th>
+      </tr>
+      {% for m in g[2] %}
+      <tr>
+        <td>{{ m[1] }}</td>
+        <td>
+          <input type="checkbox" form="form-{{ g[0] }}-{{ m[0] }}" name="puede_eliminar" value="1" {% if m[2] %}checked{% endif %}>
+        </td>
+        <td>
+          <input type="checkbox" form="form-{{ g[0] }}-{{ m[0] }}" name="puede_editar" value="1" {% if m[3] %}checked{% endif %}>
+        </td>
+        <td>
+          <form method="post" id="form-{{ g[0] }}-{{ m[0] }}">
+            <input type="hidden" name="accion" value="actualizar_permiso">
+            <input type="hidden" name="grupo_id" value="{{ g[0] }}">
+            <input type="hidden" name="usuario_id" value="{{ m[0] }}">
+            <button type="submit">Guardar</button>
+          </form>
+          <form method="post" style="display:inline;" onsubmit="return confirm('¿Quitar usuario del grupo?');">
+            <input type="hidden" name="accion" value="quitar_usuario">
+            <input type="hidden" name="grupo_id" value="{{ g[0] }}">
+            <input type="hidden" name="usuario_id" value="{{ m[0] }}">
+            <button type="submit">Quitar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p>Sin miembros.</p>
+    {% endif %}
+
+    <h5>Agregar usuario</h5>
+    <form method="post">
+      <input type="hidden" name="accion" value="agregar_usuario">
+      <input type="hidden" name="grupo_id" value="{{ g[0] }}">
+      <input type="text" name="usuario" placeholder="Usuario" required>
+      <label>
+        <input type="checkbox" name="puede_eliminar" value="1">
+        Eliminar
+      </label>
+      <label>
+        <input type="checkbox" name="puede_editar" value="1" checked>
+        Editar
+      </label>
+      <button type="submit">Agregar</button>
+    </form>
+
+    <div class="actions">
+      <button type="button" onclick="cerrarModal('{{ g[0] }}')">Cerrar</button>
+    </div>
+  </div>
+  {% endfor %}
+{% endif %}
+
+<script>
+function abrirModal(id) {
+  document.getElementById("overlay-" + id).style.display = "block";
+  document.getElementById("modal-" + id).style.display = "block";
+}
+function cerrarModal(id) {
+  document.getElementById("overlay-" + id).style.display = "none";
+  document.getElementById("modal-" + id).style.display = "none";
+}
+document.addEventListener("click", function(e){
+  {% if es_admin %}
+  {% for g in grupos %}
+  if (e.target === document.getElementById("overlay-{{ g[0] }}")) cerrarModal("{{ g[0] }}");
+  {% endfor %}
+  {% endif %}
+});
+document.addEventListener("keydown", function(e){
+  if (e.key !== "Escape") return;
+  {% if es_admin %}
+  {% for g in grupos %}
+  cerrarModal("{{ g[0] }}");
+  {% endfor %}
+  {% endif %}
+});
+</script>
+
+{% endblock %}

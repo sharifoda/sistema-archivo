@@ -1,17 +1,27 @@
 from db import get_db
+from historial import registrar_movimiento
 
 
-def crear_caja(rango_min, rango_max, creado_por=None):
+def _get_caja_pendiente_id(cur, grupo_id):
+    cur.execute(
+        "SELECT id FROM cajas WHERE grupo_id = %s AND is_pendiente = TRUE",
+        (grupo_id,)
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def crear_caja(rango_min, rango_max, grupo_id, creado_por=None):
     conn = get_db()
     cur = conn.cursor()
 
     cur.execute(
         """
-        INSERT INTO cajas (rango_min, rango_max, creado_por)
-        VALUES (%s, %s, %s)
+        INSERT INTO cajas (rango_min, rango_max, creado_por, grupo_id, is_pendiente)
+        VALUES (%s, %s, %s, %s, FALSE)
         RETURNING id
         """,
-        (rango_min, rango_max, creado_por)
+        (rango_min, rango_max, creado_por, grupo_id)
     )
 
     caja_id = cur.fetchone()[0]
@@ -20,40 +30,57 @@ def crear_caja(rango_min, rango_max, creado_por=None):
     cur.close()
     conn.close()
 
+    registrar_movimiento(
+        creado_por,
+        grupo_id,
+        entidad="caja",
+        entidad_id=caja_id,
+        accion="CREAR_CAJA",
+        datos_despues={"id": caja_id, "rango_min": rango_min, "rango_max": rango_max}
+    )
+
     return caja_id
 
 
-def asegurar_caja_sin_asignar():
+def asegurar_caja_sin_asignar(grupo_id):
     """
-    Crea la Caja 0 si no existe.
+    Crea la caja pendiente si no existe.
     Usamos rango_min=-1 y rango_max=-1 para cumplir NOT NULL.
     """
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT id FROM cajas WHERE id = 0")
-    existe = cur.fetchone()
+    pendiente_id = _get_caja_pendiente_id(cur, grupo_id)
 
-    if not existe:
+    if pendiente_id is None:
         cur.execute(
-            "INSERT INTO cajas (id, rango_min, rango_max, creado_por) VALUES (%s, %s, %s, %s)",
-            (0, -1, -1, None)
+            """
+            INSERT INTO cajas (rango_min, rango_max, creado_por, grupo_id, is_pendiente)
+            VALUES (%s, %s, %s, %s, TRUE)
+            RETURNING id
+            """,
+            (-1, -1, None, grupo_id)
         )
+        pendiente_id = cur.fetchone()[0]
         conn.commit()
 
     cur.close()
     conn.close()
+    return pendiente_id
 
 
-def reubicar_archivos_pendientes_por_nueva_caja(caja_id):
+def reubicar_archivos_pendientes_por_nueva_caja(caja_id, grupo_id, usuario_id=None):
     """
-    Mueve archivos de Caja 0 que encajen en el rango de esta caja.
-    Retorna cuántos movió.
+    Mueve archivos de la caja pendiente que encajen en el rango de esta caja.
+    Retorna cuantos movio.
     """
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT rango_min, rango_max FROM cajas WHERE id = %s", (caja_id,))
+    cur.execute(
+        "SELECT rango_min, rango_max FROM cajas WHERE id = %s AND grupo_id = %s",
+        (caja_id, grupo_id)
+    )
     rango = cur.fetchone()
     if not rango:
         cur.close()
@@ -61,21 +88,45 @@ def reubicar_archivos_pendientes_por_nueva_caja(caja_id):
         return 0
 
     rmin, rmax = rango
+    pendiente_id = _get_caja_pendiente_id(cur, grupo_id)
+    if pendiente_id is None:
+        cur.close()
+        conn.close()
+        return 0
 
-    cur.execute("""
+    cur.execute(
+        """
         SELECT id
         FROM archivos
-        WHERE caja_id = 0
+        WHERE caja_id = %s
+          AND grupo_id = %s
           AND numero BETWEEN %s AND %s
-    """, (rmin, rmax))
+        """,
+        (pendiente_id, grupo_id, rmin, rmax)
+    )
 
     archivos = cur.fetchall()
     contador = 0
 
     for (archivo_id,) in archivos:
         cur.execute(
+            "SELECT caja_id FROM archivos WHERE id = %s",
+            (archivo_id,)
+        )
+        before_caja = cur.fetchone()[0]
+
+        cur.execute(
             "UPDATE archivos SET caja_id = %s WHERE id = %s",
             (caja_id, archivo_id)
+        )
+        registrar_movimiento(
+            usuario_id,
+            grupo_id,
+            entidad="archivo",
+            entidad_id=archivo_id,
+            accion="ARCHIVO_MOVER",
+            datos_antes={"caja_id": before_caja},
+            datos_despues={"caja_id": caja_id},
         )
         contador += 1
 
@@ -86,36 +137,58 @@ def reubicar_archivos_pendientes_por_nueva_caja(caja_id):
     return contador
 
 
-def modificar_caja(caja_id, nuevo_min, nuevo_max):
+def modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, usuario_id=None):
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
+        "SELECT rango_min, rango_max FROM cajas WHERE id = %s AND grupo_id = %s",
+        (caja_id, grupo_id)
+    )
+    antes = cur.fetchone()
+
+    cur.execute(
+        """
         UPDATE cajas
         SET rango_min = %s, rango_max = %s
-        WHERE id = %s
-    """, (nuevo_min, nuevo_max, caja_id))
+        WHERE id = %s AND grupo_id = %s
+        """,
+        (nuevo_min, nuevo_max, caja_id, grupo_id)
+    )
 
     conn.commit()
     cur.close()
     conn.close()
 
+    if antes:
+        registrar_movimiento(
+            usuario_id,
+            grupo_id,
+            entidad="caja",
+            entidad_id=caja_id,
+            accion="MODIFICAR_CAJA",
+            datos_antes={"rango_min": antes[0], "rango_max": antes[1]},
+            datos_despues={"rango_min": nuevo_min, "rango_max": nuevo_max},
+        )
 
-def reubicar_archivos_de_caja(caja_id):
+
+def reubicar_archivos_de_caja(caja_id, grupo_id, usuario_id=None):
     """
-    Después de modificar rangos, saca de esta caja los archivos que ya no caben.
-    Los mueve a otra caja si existe, o a Caja 0 si no existe.
-    Retorna cuántos movió.
+    Despues de modificar rangos, saca de esta caja los archivos que ya no caben.
+    Los mueve a otra caja si existe, o a la caja pendiente si no existe.
+    Retorna cuantos movio.
     """
-    if caja_id == 0:
+    pendiente_id = asegurar_caja_sin_asignar(grupo_id)
+    if caja_id == pendiente_id:
         return 0
-
-    asegurar_caja_sin_asignar()
 
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT rango_min, rango_max FROM cajas WHERE id = %s", (caja_id,))
+    cur.execute(
+        "SELECT rango_min, rango_max FROM cajas WHERE id = %s AND grupo_id = %s",
+        (caja_id, grupo_id)
+    )
     rango = cur.fetchone()
     if not rango:
         cur.close()
@@ -124,33 +197,50 @@ def reubicar_archivos_de_caja(caja_id):
 
     rmin, rmax = rango
 
-    cur.execute("""
+    cur.execute(
+        """
         SELECT id, numero
         FROM archivos
         WHERE caja_id = %s
+          AND grupo_id = %s
           AND NOT (%s <= numero AND numero <= %s)
-    """, (caja_id, rmin, rmax))
+        """,
+        (caja_id, grupo_id, rmin, rmax)
+    )
 
     fuera = cur.fetchall()
     contador = 0
 
     for archivo_id, numero in fuera:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id
             FROM cajas
             WHERE id <> %s
-              AND id <> 0
+              AND grupo_id = %s
+              AND is_pendiente = FALSE
               AND %s BETWEEN rango_min AND rango_max
             ORDER BY rango_min, id
             LIMIT 1
-        """, (caja_id, numero))
+            """,
+            (caja_id, grupo_id, numero)
+        )
 
         destino = cur.fetchone()
-        destino_id = destino[0] if destino else 0
+        destino_id = destino[0] if destino else pendiente_id
 
         cur.execute(
             "UPDATE archivos SET caja_id = %s WHERE id = %s",
             (destino_id, archivo_id)
+        )
+        registrar_movimiento(
+            usuario_id,
+            grupo_id,
+            entidad="archivo",
+            entidad_id=archivo_id,
+            accion="ARCHIVO_MOVER",
+            datos_antes={"caja_id": caja_id},
+            datos_despues={"caja_id": destino_id},
         )
         contador += 1
 
@@ -161,45 +251,76 @@ def reubicar_archivos_de_caja(caja_id):
     return contador
 
 
-def eliminar_caja(caja_id):
+def eliminar_caja(caja_id, grupo_id, usuario_id=None):
     """
     Elimina una caja sin borrar archivos:
     - mueve sus archivos a otra caja por rango si existe
-    - si no, a Caja 0
+    - si no, a la caja pendiente
     - luego borra la caja
     """
-    if caja_id == 0:
+    pendiente_id = asegurar_caja_sin_asignar(grupo_id)
+    if caja_id == pendiente_id:
         return
-
-    asegurar_caja_sin_asignar()
 
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT id, numero FROM archivos WHERE caja_id = %s", (caja_id,))
+    cur.execute(
+        "SELECT id, numero FROM archivos WHERE caja_id = %s AND grupo_id = %s",
+        (caja_id, grupo_id)
+    )
     archivos = cur.fetchall()
 
     for archivo_id, numero in archivos:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id
             FROM cajas
             WHERE id <> %s
-              AND id <> 0
+              AND grupo_id = %s
+              AND is_pendiente = FALSE
               AND %s BETWEEN rango_min AND rango_max
             ORDER BY rango_min, id
             LIMIT 1
-        """, (caja_id, numero))
+            """,
+            (caja_id, grupo_id, numero)
+        )
 
         destino = cur.fetchone()
-        destino_id = destino[0] if destino else 0
+        destino_id = destino[0] if destino else pendiente_id
 
         cur.execute(
             "UPDATE archivos SET caja_id = %s WHERE id = %s",
             (destino_id, archivo_id)
         )
+        registrar_movimiento(
+            usuario_id,
+            grupo_id,
+            entidad="archivo",
+            entidad_id=archivo_id,
+            accion="ARCHIVO_MOVER",
+            datos_antes={"caja_id": caja_id},
+            datos_despues={"caja_id": destino_id},
+        )
 
-    cur.execute("DELETE FROM cajas WHERE id = %s", (caja_id,))
+    cur.execute(
+        "SELECT rango_min, rango_max FROM cajas WHERE id = %s AND grupo_id = %s",
+        (caja_id, grupo_id)
+    )
+    antes = cur.fetchone()
+
+    cur.execute("DELETE FROM cajas WHERE id = %s AND grupo_id = %s", (caja_id, grupo_id))
 
     conn.commit()
     cur.close()
     conn.close()
+
+    if antes:
+        registrar_movimiento(
+            usuario_id,
+            grupo_id,
+            entidad="caja",
+            entidad_id=caja_id,
+            accion="ELIMINAR_CAJA",
+            datos_antes={"rango_min": antes[0], "rango_max": antes[1]},
+        )

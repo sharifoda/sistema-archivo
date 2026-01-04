@@ -15,11 +15,12 @@ def crear_usuario(usuario, password, rol="cliente"):
 
     try:
         cur.execute(
-            "INSERT INTO usuarios (usuario, password, rol) VALUES (%s, %s, %s)",
+            "INSERT INTO usuarios (usuario, password, rol) VALUES (%s, %s, %s) RETURNING id",
             (usuario, hash_pw, rol)
         )
+        user_id = cur.fetchone()[0]
         conn.commit()
-        return True
+        return user_id
     except psycopg2.errors.UniqueViolation:
         # usuario ya existe
         conn.rollback()

@@ -1,6 +1,6 @@
 from db import get_db
 
-def registrar_log(usuario_id, accion, ip=None):
+def registrar_log(usuario_id, accion, ip=None, grupo_id=None):
     """
     Guarda un log en la tabla logs.
     usuario_id: int (id del usuario en la tabla usuarios)
@@ -14,8 +14,8 @@ def registrar_log(usuario_id, accion, ip=None):
     cur = conn.cursor()
 
     cur.execute(
-        "INSERT INTO logs (usuario_id, accion, ip) VALUES (%s, %s, %s)",
-        (usuario_id, accion, ip)
+        "INSERT INTO logs (usuario_id, accion, ip, grupo_id) VALUES (%s, %s, %s, %s)",
+        (usuario_id, accion, ip, grupo_id)
     )
 
     conn.commit()

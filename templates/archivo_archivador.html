@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .archivador-actions{
+    display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap;
+  }
+  .lista-cajas{ margin-top:10px; }
+  .caja-item{ border:1px solid #000; border-radius:8px; padding:10px; margin-bottom:10px; }
+  .archivador-table{ width:100%; border-collapse:collapse; margin-top:8px; }
+  .archivador-table th, .archivador-table td{ border:1px solid #000; padding:8px; }
+  .muted{ color:#666; font-size:12px; }
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
+  }
+  .modal{
+    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(520px,92vw); background:#fff; border-radius:12px; padding:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:1000;
+  }
+  .modal .actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:14px; }
+</style>
+
+<h2>Archivador - Dashboard especial</h2>
+
+<div class="archivador-actions">
+  <a href="{{ url_for('archivo') }}?view=normal">Dashboard normal</a>
+  <button type="button" onclick="abrirModal()">Mover seleccion</button>
+  <button type="button" onclick="abrirModalEliminar()">Eliminar seleccion</button>
+  <span class="muted" id="selInfo">Seleccionados: 0 cajas, 0 archivos</span>
+</div>
+
+<div class="lista-cajas">
+  {% for c in cajas %}
+  <div class="caja-item">
+    <details>
+      <summary>
+        <input type="checkbox" class="chk-caja" value="{{ c.id }}" onchange="actualizarSeleccion()"
+               {% if c.is_pendiente %}disabled{% endif %}>
+        {% if c.is_pendiente %}
+          Caja 0 (Pendiente)
+        {% else %}
+          Caja {{ loop.index }} (Rango {{ c.rango_min }} - {{ c.rango_max }})
+        {% endif %}
+        {% if c.grupo_origen_id %}<span class="muted"> | Origen: {{ c.grupo_origen_id }}</span>{% endif %}
+      </summary>
+
+      {% if c.archivos and c.archivos|length > 0 %}
+      <table class="archivador-table">
+        <tr>
+          <th></th>
+          <th>Documento</th>
+          <th>Nombre</th>
+          <th>PDF</th>
+          <th>Origen</th>
+        </tr>
+        {% for a in c.archivos %}
+        <tr>
+          <td><input type="checkbox" class="chk-archivo" value="{{ a.id }}" onchange="actualizarSeleccion()"></td>
+          <td>{{ a.numero }}</td>
+          <td>{{ a.nombre }}</td>
+          <td>{{ "Si" if a.pdf_path else "No" }}</td>
+          <td>{{ a.grupo_origen_id or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="muted">Sin archivos.</p>
+      {% endif %}
+    </details>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="modal-overlay" id="overlayMover"></div>
+<div class="modal" id="modalMover">
+  <h3>Mover seleccion</h3>
+  <p class="muted" id="modalInfo"></p>
+
+  <form method="post" action="{{ url_for('archivador_transferir') }}">
+    <input type="hidden" name="cajas_ids" id="cajas_ids">
+    <input type="hidden" name="archivos_ids" id="archivos_ids">
+
+    <label>Empresa destino</label><br>
+    <select name="grupo_destino" required>
+      {% for g in grupos_destino %}
+        <option value="{{ g[0] }}">{{ g[1] }}</option>
+      {% endfor %}
+    </select>
+
+    <div class="actions">
+      <button type="button" onclick="cerrarModal()">Cancelar</button>
+      <button type="submit">Mover</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-overlay" id="overlayEliminar"></div>
+<div class="modal" id="modalEliminar">
+  <h3>Eliminar seleccion</h3>
+  <p class="muted" id="modalEliminarInfo"></p>
+
+  <form method="post" action="{{ url_for('archivador_eliminar') }}"
+        onsubmit="return confirm('¿Eliminar permanentemente los elementos seleccionados?');">
+    <input type="hidden" name="cajas_ids" id="cajas_ids_eliminar">
+    <input type="hidden" name="archivos_ids" id="archivos_ids_eliminar">
+
+    <div class="actions">
+      <button type="button" onclick="cerrarModalEliminar()">Cancelar</button>
+      <button type="submit">Eliminar</button>
+    </div>
+  </form>
+</div>
+
+<script>
+function getCheckedValues(selector) {
+  const nodes = document.querySelectorAll(selector + ":checked");
+  return Array.from(nodes).map(n => n.value);
+}
+
+function actualizarSeleccion() {
+  const cajas = getCheckedValues(".chk-caja");
+  const archivos = getCheckedValues(".chk-archivo");
+  const info = document.getElementById("selInfo");
+  if (info) {
+    info.textContent = "Seleccionados: " + cajas.length + " cajas, " + archivos.length + " archivos";
+  }
+}
+
+function abrirModal() {
+  const cajas = getCheckedValues(".chk-caja");
+  const archivos = getCheckedValues(".chk-archivo");
+
+  document.getElementById("cajas_ids").value = cajas.join(",");
+  document.getElementById("archivos_ids").value = archivos.join(",");
+  document.getElementById("modalInfo").textContent =
+    "Vas a mover " + cajas.length + " cajas y " + archivos.length + " archivos.";
+
+  document.getElementById("overlayMover").style.display = "block";
+  document.getElementById("modalMover").style.display = "block";
+}
+
+function cerrarModal() {
+  document.getElementById("overlayMover").style.display = "none";
+  document.getElementById("modalMover").style.display = "none";
+}
+
+function abrirModalEliminar() {
+  const cajas = getCheckedValues(".chk-caja");
+  const archivos = getCheckedValues(".chk-archivo");
+
+  document.getElementById("cajas_ids_eliminar").value = cajas.join(",");
+  document.getElementById("archivos_ids_eliminar").value = archivos.join(",");
+  document.getElementById("modalEliminarInfo").textContent =
+    "Vas a eliminar " + cajas.length + " cajas y " + archivos.length + " archivos.";
+
+  document.getElementById("overlayEliminar").style.display = "block";
+  document.getElementById("modalEliminar").style.display = "block";
+}
+
+function cerrarModalEliminar() {
+  document.getElementById("overlayEliminar").style.display = "none";
+  document.getElementById("modalEliminar").style.display = "none";
+}
+
+document.addEventListener("click", function(e){
+  if (e.target === document.getElementById("overlayMover")) cerrarModal();
+  if (e.target === document.getElementById("overlayEliminar")) cerrarModalEliminar();
+});
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape") { cerrarModal(); cerrarModalEliminar(); }
+});
+</script>
+
+{% endblock %}

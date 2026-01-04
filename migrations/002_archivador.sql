@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE cajas ADD COLUMN IF NOT EXISTS grupo_origen_id INTEGER REFERENCES grupos(id);
+ALTER TABLE archivos ADD COLUMN IF NOT EXISTS grupo_origen_id INTEGER REFERENCES grupos(id);
+
+COMMIT;

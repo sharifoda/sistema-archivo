@@ -1,14 +1,24 @@
 body {
     font-family: Arial, sans-serif;
     margin: 30px;
-    color: #111;
-    background: #fafafa;
+    color: #000000;
+    background-color: #dddddd;
+    background-image:
+        radial-gradient(circle at 8% 12%, rgba(46, 139, 87, 0.12) 0, rgba(46, 139, 87, 0.12) 60px, transparent 61px),
+        radial-gradient(circle at 92% 18%, rgba(70, 130, 180, 0.12) 0, rgba(70, 130, 180, 0.12) 80px, transparent 81px),
+        radial-gradient(circle at 15% 78%, rgba(238, 186, 73, 0.12) 0, rgba(238, 186, 73, 0.12) 70px, transparent 71px),
+        radial-gradient(circle at 85% 72%, rgba(186, 85, 211, 0.12) 0, rgba(186, 85, 211, 0.12) 75px, transparent 76px),
+        radial-gradient(circle at 52% 28%, rgba(220, 20, 60, 0.10) 0, rgba(220, 20, 60, 0.10) 55px, transparent 56px),
+        linear-gradient(135deg, rgba(30, 144, 255, 0.10) 0%, rgba(30, 144, 255, 0.10) 20%, transparent 20%, transparent 40%, rgba(255, 215, 0, 0.10) 40%, rgba(255, 215, 0, 0.10) 60%, transparent 60%),
+        linear-gradient(25deg, rgba(72, 61, 139, 0.10) 0%, rgba(72, 61, 139, 0.10) 18%, transparent 18%, transparent 36%, rgba(50, 205, 50, 0.10) 36%, rgba(50, 205, 50, 0.10) 54%, transparent 54%),
+        repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.03) 0, rgba(0, 0, 0, 0.03) 2px, transparent 2px, transparent 8px);
+    background-attachment: fixed;
 }
 
 nav a {
     margin-right: 10px;
     text-decoration: none;
-    color: #111;
+    color: #000000;
 }
 
 table {

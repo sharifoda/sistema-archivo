@@ -2,7 +2,7 @@ print(">>> APP.PY CORRECTO CARGADO <<<")
 import os
 from werkzeug.utils import secure_filename
 from flask import send_file, send_from_directory
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from io import BytesIO
 from flask import Flask, render_template, request, redirect, url_for, session, send_file
 from cajas import (
@@ -14,7 +14,7 @@ from cajas import (
     reubicar_archivos_pendientes_por_nueva_caja
 )
 from archivos import agregar_archivo, modificar_archivo, eliminar_archivo
-from auth import crear_usuario, verificar_usuario, obtener_usuario_y_rol
+from auth import crear_usuario, verificar_usuario, obtener_usuario_y_rol, usuario_existe
 from grupos import (
     crear_grupo,
     agregar_usuario_a_grupo,
@@ -33,7 +33,6 @@ from werkzeug.security import generate_password_hash
 from db import get_db
 from io import BytesIO
 from datetime import datetime
-from openpyxl import Workbook
 from openpyxl.styles import Font
 from flask import flash
 
@@ -133,6 +132,10 @@ def login():
             )
 
             return redirect(url_for("inicio"))
+        if usuario_existe(usuario):
+            flash("Contrasena incorrecta.", "error")
+        else:
+            flash("Usuario no registrado.", "error")
 
     return render_template("login.html")
 
@@ -360,8 +363,15 @@ def grupos():
 
                 conn = get_db()
                 cur = conn.cursor()
-                cur.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
-                conn.commit()
+                try:
+                    cur.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    flash(f"Error al eliminar usuario: {e}", "error")
+                    cur.close()
+                    conn.close()
+                    return redirect(url_for("grupos"))
                 cur.close()
                 conn.close()
                 flash("Usuario eliminado correctamente.", "success")
@@ -1053,6 +1063,123 @@ def archivo():
     accion = request.form.get("accion") if request.method == "POST" else None
 
     if request.method == "POST":
+        # ---------- Importar Excel ----------
+        if accion == "importar_excel":
+            if not admin_requerido():
+                flash("Solo el admin puede importar Excel.", "error")
+                return redirect(url_for("archivo"))
+
+            excel_file = request.files.get("excel")
+            if not excel_file or not excel_file.filename:
+                flash("Debes seleccionar un archivo Excel.", "error")
+                return redirect(url_for("archivo"))
+
+            try:
+                wb = load_workbook(excel_file, data_only=True)
+            except Exception as e:
+                flash(f"Archivo Excel invalido: {e}", "error")
+                return redirect(url_for("archivo"))
+
+            ws = wb.active
+            max_row = ws.max_row or 1
+            max_col = ws.max_column or 1
+
+            columnas = []
+            for col in range(1, max_col + 1):
+                header = ws.cell(row=1, column=col).value
+                if header is None or str(header).strip() == "":
+                    continue
+                numeros = []
+                for row in range(2, max_row + 1):
+                    cell_val = ws.cell(row=row, column=col).value
+                    if cell_val is None:
+                        continue
+                    if isinstance(cell_val, (int, float)):
+                        try:
+                            num = int(cell_val)
+                        except Exception:
+                            continue
+                    else:
+                        s = str(cell_val).strip()
+                        if not s.isdigit():
+                            continue
+                        num = int(s)
+                    numeros.append(num)
+                columnas.append((col, str(header).strip(), numeros))
+
+            if not columnas:
+                flash("No se encontraron cajas en la primera fila del Excel.", "error")
+                return redirect(url_for("archivo"))
+
+            total_cajas = 0
+            total_docs = 0
+            insertados = 0
+            duplicados = 0
+            vacias = 0
+
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                for _, _, nums in columnas:
+                    nums = sorted(set(nums))
+                    if not nums:
+                        vacias += 1
+                        continue
+                    rmin = min(nums)
+                    rmax = max(nums)
+                    caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=session.get("usuario_id"))
+                    total_cajas += 1
+                    total_docs += len(nums)
+
+                    for numero in nums:
+                        nombre = f"Documento {numero}"
+                        cur.execute(
+                            """
+                            INSERT INTO archivos (numero, nombre, caja_id, creado_por, grupo_id)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (grupo_id, numero) DO NOTHING
+                            RETURNING id
+                            """,
+                            (numero, nombre, caja_id, session.get("usuario_id"), grupo_id)
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            insertados += 1
+                            registrar_movimiento(
+                                session.get("usuario_id"),
+                                grupo_id,
+                                entidad="archivo",
+                                entidad_id=row[0],
+                                accion="CREAR_ARCHIVO",
+                                datos_despues={
+                                    "id": row[0],
+                                    "numero": numero,
+                                    "nombre": nombre,
+                                    "caja_id": caja_id
+                                },
+                            )
+                        else:
+                            duplicados += 1
+
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                flash(f"Error al importar Excel: {e}", "error")
+                return redirect(url_for("archivo"))
+
+            cur.close()
+            conn.close()
+
+            msg = f"Importacion lista. Cajas: {total_cajas}, Documentos: {insertados}"
+            if duplicados:
+                msg += f", Duplicados: {duplicados}"
+            if vacias:
+                msg += f", Cajas vacias: {vacias}"
+            flash(msg + ".", "success")
+            return redirect(url_for("archivo"))
+
         # ---------- Crear Caja ----------
         if accion == "crear_caja":
             rmin = int(request.form["rango_min"])
@@ -1743,9 +1870,10 @@ def admin_logs():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT u.usuario, l.accion, l.fecha, l.ip, g.nombre, l.grupo_id
+        SELECT COALESCE(u.usuario, '[eliminado]') AS usuario,
+               l.accion, l.fecha, l.ip, g.nombre, l.grupo_id
         FROM logs l
-        JOIN usuarios u ON u.id = l.usuario_id
+        LEFT JOIN usuarios u ON u.id = l.usuario_id
         LEFT JOIN grupos g ON g.id = l.grupo_id
         ORDER BY l.fecha DESC
         LIMIT 200
@@ -1757,7 +1885,7 @@ def admin_logs():
         SELECT
             m.id,
             m.fecha,
-            u.usuario,
+            COALESCE(u.usuario, '[eliminado]') AS usuario,
             g.nombre,
             m.entidad,
             m.accion,
@@ -1766,7 +1894,7 @@ def admin_logs():
             m.grupo_id,
             m.entidad_id
         FROM movimientos m
-        JOIN usuarios u ON u.id = m.usuario_id
+        LEFT JOIN usuarios u ON u.id = m.usuario_id
         LEFT JOIN grupos g ON g.id = m.grupo_id
         ORDER BY m.fecha DESC
         LIMIT 200
@@ -2178,7 +2306,7 @@ def export_excel():
         LEFT JOIN archivos a ON a.caja_id = r.id AND a.grupo_id = %s
         GROUP BY r.caja_visible, r.rango_min, r.rango_max
         ORDER BY r.caja_visible
-    """)
+    """, (grupo_id, grupo_id))
     cajas = cur.fetchall()
 
     # Caja pendiente (solo si tiene archivos)

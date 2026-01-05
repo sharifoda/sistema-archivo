@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
 <style>
@@ -121,21 +121,42 @@
 
 <!-- Excel -->
 <div class="excel-fab">
-  <a class="btn" href="{{ url_for('export_excel') }}">⬇️ Descargar Excel</a>
+  <a class="btn" href="{{ url_for('export_excel') }}">Descargar Excel</a>
+  {% if session.get("rol") == "admin" %}
+  <button class="btn" type="button" onclick="abrirModal('ImportExcel')" style="margin-top:8px;">Importar Excel</button>
+  {% endif %}
+</div>
+
+<!-- ===== MODAL IMPORTAR EXCEL ===== -->
+<div class="modal-overlay" id="overlayImportExcel"></div>
+<div class="modal" id="modalImportExcel">
+  <h3>Importar Excel</h3>
+
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="accion" value="importar_excel">
+
+    <label>Archivo Excel</label><br>
+    <input type="file" name="excel" accept=".xlsx,.xls" required><br><br>
+
+    <div class="actions">
+      <button type="button" class="btn" onclick="cerrarModal('ImportExcel')">Cancelar</button>
+      <button type="submit" class="btn">Importar</button>
+    </div>
+  </form>
 </div>
 
 <!-- ===== MODAL CREAR CAJA ===== -->
 <div class="modal-overlay" id="overlayCaja"></div>
 <div class="modal" id="modalCaja">
-  <h3>➕ Crear caja</h3>
+  <h3>âž• Crear caja</h3>
 
   <form method="post">
     <input type="hidden" name="accion" value="crear_caja">
 
-    <label>Rango mínimo</label><br>
+    <label>Rango mÃ­nimo</label><br>
     <input type="number" name="rango_min" required><br><br>
 
-    <label>Rango máximo</label><br>
+    <label>Rango mÃ¡ximo</label><br>
     <input type="number" name="rango_max" required><br><br>
 
     <div class="actions">
@@ -148,12 +169,12 @@
 <!-- ===== MODAL AGREGAR DOCUMENTO (PDF) ===== -->
 <div class="modal-overlay" id="overlayDoc"></div>
 <div class="modal" id="modalDoc">
-  <h3>➕ Agregar documento</h3>
+  <h3>âž• Agregar documento</h3>
 
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="accion" value="agregar_documento">
 
-    <label>Documento (número)</label><br>
+    <label>Documento (nÃºmero)</label><br>
     <input type="number" name="numero" required><br><br>
 
     <label>Nombre</label><br>
@@ -172,7 +193,7 @@
 <!-- ===== MODAL RESULTADO BUSQUEDA ===== -->
 <div class="modal-overlay" id="overlayBuscar"></div>
 <div class="modal" id="modalBuscar">
-  <h3>🔎 Resultado de búsqueda</h3>
+  <h3>ðŸ”Ž Resultado de bÃºsqueda</h3>
 
   <div id="buscarContenido" class="table-wrap" style="margin-top:10px;"></div>
 
@@ -184,7 +205,7 @@
 <!-- ===== MODAL EDITAR (PDF) ===== -->
 <div class="modal-overlay" id="overlayEditar"></div>
 <div class="modal" id="modalEditar">
-  <h3>✏️ Modificar archivo</h3>
+  <h3>âœï¸ Modificar archivo</h3>
   <p style="margin:6px 0 12px; color:#555;" id="editarInfo"></p>
 
   <form method="post" enctype="multipart/form-data">
@@ -200,7 +221,7 @@
     <label>PDF (opcional)</label><br>
     <input type="file" name="pdf" accept="application/pdf"><br><br>
 
-    <!-- ✅ NUEVO: eliminar PDF actual -->
+    <!-- âœ… NUEVO: eliminar PDF actual -->
     <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
       <input type="checkbox" name="remove_pdf" value="1">
       Eliminar PDF actual (si existe)
@@ -215,7 +236,7 @@
 </div>
 
 <!-- =========================
-     ✅ Server data (sin <script>)
+     âœ… Server data (sin <script>)
      ========================= -->
 <div id="server-data"
      data-json='{{ {
@@ -225,8 +246,9 @@
      } | tojson }}'>
 </div>
 
-<!-- ✅ JS externo (no rojo) -->
+<!-- âœ… JS externo (no rojo) -->
 <script src="{{ url_for('static', filename='archivo_dashboard.js') }}"></script>
 
 {% endblock %}
+
 

@@ -79,3 +79,19 @@ def obtener_usuario_y_rol(usuario):
     conn.close()
 
     return dato
+
+
+def usuario_existe(usuario):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT 1 FROM usuarios WHERE usuario = %s AND activo = TRUE",
+        (usuario,)
+    )
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return row is not None

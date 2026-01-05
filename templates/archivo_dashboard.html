@@ -11,11 +11,11 @@
 
   .btn{
     padding:10px 14px; border:2px solid #000; background:#fff; cursor:pointer;
-    min-width:220px; border-radius:8px;
+    min-width:0; border-radius:8px; font-size:16px; line-height:1; display:inline-block; text-align:center;
   }
   .btn-small{
     padding:8px 10px; border:2px solid #000; background:#fff; cursor:pointer;
-    border-radius:8px; min-width:auto; font-size:13px; display:inline-block;
+    border-radius:8px; min-width:auto; font-size:16px; display:inline-block;
   }
   .btn-danger{ border-color:#b00020; color:#b00020; }
   .btn-disabled{ opacity:.55; cursor:not-allowed; }
@@ -66,6 +66,9 @@
     bottom: 26px;
     z-index: 2000;
   }
+  .excel-fab .btn{
+    text-decoration: none;
+  }
 
   /* tabla modal */
   .table-wrap{ overflow:auto; }
@@ -78,28 +81,28 @@
   #server-data{ display:none; }
 </style>
 
-<h2>📦 Archivo</h2>
+<h2>📂 Archivo</h2>
 
 {% if archivador_mode %}
 <div style="margin-bottom:12px;">
-  <a class="btn" href="{{ url_for('archivo') }}?view=especial">Dashboard especial</a>
+  <a class="btn" href="{{ url_for('archivo') }}?view=especial">Dashboard Especial</a>
 </div>
 {% endif %}
 
 <div class="topbar">
   <div class="left">
-    <button class="btn" type="button" onclick="abrirModal('Caja')">AGREGAR CAJA</button>
+    <button class="btn" type="button" onclick="abrirModal('Caja')">Agregar Caja</button>
   </div>
 
   <div class="center">
     <form method="get" action="{{ url_for('archivo') }}" style="display:flex; gap:10px; align-items:center;">
-      <input class="btn" style="min-width:280px;" type="text" name="buscar" placeholder="BUSCAR DOCUMENTO O NOMBRE" required>
-      <button class="btn" style="min-width:auto;" type="submit">BUSCAR</button>
+      <input class="btn" style="min-width:360px; text-align:left;" type="text" name="buscar" placeholder="Buscar documento o nombre" required>
+      <button class="btn" style="min-width:auto;" type="submit">Buscar</button>
     </form>
   </div>
 
   <div class="right">
-    <button class="btn" type="button" onclick="abrirModal('Doc')">AGREGAR DOCUMENTO</button>
+    <button class="btn" type="button" onclick="abrirModal('Doc')">Agregar Documento</button>
   </div>
 </div>
 
@@ -110,9 +113,9 @@
       <div class="num">{{ c[1] }}</div>
       <div class="meta">
         {% if c[1] == 0 %}
-          Pendiente ({{ c[4] }} archivos)
+          Pendiente ({{ c[4] }} documentos)
         {% else %}
-          {{ c[4] }} archivos
+          {{ c[4] }} documentos
         {% endif %}
       </div>
     </a>
@@ -123,7 +126,7 @@
 <div class="excel-fab">
   <a class="btn" href="{{ url_for('export_excel') }}">Descargar Excel</a>
   {% if session.get("rol") == "admin" %}
-  <button class="btn" type="button" onclick="abrirModal('ImportExcel')" style="margin-top:8px;">Importar Excel</button>
+  <button class="btn" type="button" onclick="abrirModal('ImportExcel')">Importar Excel</button>
   {% endif %}
 </div>
 
@@ -148,15 +151,15 @@
 <!-- ===== MODAL CREAR CAJA ===== -->
 <div class="modal-overlay" id="overlayCaja"></div>
 <div class="modal" id="modalCaja">
-  <h3>âž• Crear caja</h3>
+  <h3>📦 Crear caja</h3>
 
   <form method="post">
     <input type="hidden" name="accion" value="crear_caja">
 
-    <label>Rango mÃ­nimo</label><br>
+    <label>Rango minimo</label><br>
     <input type="number" name="rango_min" required><br><br>
 
-    <label>Rango mÃ¡ximo</label><br>
+    <label>Rango maximo</label><br>
     <input type="number" name="rango_max" required><br><br>
 
     <div class="actions">
@@ -169,16 +172,16 @@
 <!-- ===== MODAL AGREGAR DOCUMENTO (PDF) ===== -->
 <div class="modal-overlay" id="overlayDoc"></div>
 <div class="modal" id="modalDoc">
-  <h3>âž• Agregar documento</h3>
+  <h3>📄 Agregar documento</h3>
 
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="accion" value="agregar_documento">
 
-    <label>Documento (nÃºmero)</label><br>
+    <label>Documento (numero)</label><br>
     <input type="number" name="numero" required><br><br>
 
     <label>Nombre</label><br>
-    <input type="text" name="nombre" required><br><br>
+    <input type="text" name="nombre"><br><br>
 
     <label>PDF (opcional)</label><br>
     <input type="file" name="pdf" accept="application/pdf"><br><br>
@@ -193,7 +196,7 @@
 <!-- ===== MODAL RESULTADO BUSQUEDA ===== -->
 <div class="modal-overlay" id="overlayBuscar"></div>
 <div class="modal" id="modalBuscar">
-  <h3>ðŸ”Ž Resultado de bÃºsqueda</h3>
+  <h3>📂 Resultado de busqueda</h3>
 
   <div id="buscarContenido" class="table-wrap" style="margin-top:10px;"></div>
 
@@ -205,7 +208,7 @@
 <!-- ===== MODAL EDITAR (PDF) ===== -->
 <div class="modal-overlay" id="overlayEditar"></div>
 <div class="modal" id="modalEditar">
-  <h3>âœï¸ Modificar archivo</h3>
+  <h3>✏️ Modificar archivo</h3>
   <p style="margin:6px 0 12px; color:#555;" id="editarInfo"></p>
 
   <form method="post" enctype="multipart/form-data">

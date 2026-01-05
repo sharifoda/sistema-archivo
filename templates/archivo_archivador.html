@@ -4,11 +4,35 @@
 <style>
   .archivador-actions{
     display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap;
+    position:sticky; top:0; background:#f7f7f7; padding:6px 10px; z-index:5;
+    border:1px solid #000; border-radius:8px;
   }
   .lista-cajas{ margin-top:10px; }
-  .caja-item{ border:1px solid #000; border-radius:8px; padding:10px; margin-bottom:10px; }
+  .caja-item{ border:1px solid #000; border-radius:10px; padding:12px; margin-bottom:12px; background:#fff; }
+  .caja-pendiente{ background:#f4f4f4; border-style:dashed; }
+  .caja-header{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .badge{
+    display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px;
+    background:#f1f1f1; color:#444;
+  }
+  .badge-muted{ background:#f1f1f1; color:#444; }
+  .badge-origin{ background:#e8f6f0; color:#1f6a4a; }
+  .box-title{ font-weight:bold; }
+  .btn-primary{ background:#e8f1ff; border:2px solid #1f5ca8; color:#1f5ca8; padding:6px 10px; }
+  .btn-danger{ background:#ffe9e9; border:2px solid #b00020; color:#b00020; padding:6px 10px; }
   .archivador-table{ width:100%; border-collapse:collapse; margin-top:8px; }
-  .archivador-table th, .archivador-table td{ border:1px solid #000; padding:8px; }
+  .archivador-table th, .archivador-table td{ border:1px solid #bbb; padding:8px; }
+  .archivador-table th{ position:sticky; top:42px; background:#f7f7f7; }
+  .archivador-table tr:nth-child(even) td{ background:#f7f7f7; }
+  .archivador-table th, .archivador-table td{ white-space:nowrap; }
+  .archivador-table .col-actions{ text-align:right; width:1%; }
+  .archivador-table .col-origen{ text-align:left; }
+  .archivador-table th.col-origen{ text-align:center; }
+  .archivador-table .col-select{ width:1%; }
+  .archivador-table .col-doc{ width:1%; }
+  .archivador-table .col-name{ width:1%; }
+  .archivador-table .col-pdf{ width:1%; }
+  .archivador-table .col-origen{ width:1%; }
   .muted{ color:#666; font-size:12px; }
   .modal-overlay{
     display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
@@ -23,44 +47,66 @@
 
 <h2>Archivador - Dashboard especial</h2>
 
+{% set total_cajas = cajas|length %}
+{% set ns = namespace(docs=0) %}
+{% for c in cajas %}
+  {% set ns.docs = ns.docs + (c.archivos|length) %}
+{% endfor %}
+<div class="muted" style="margin:6px 0 10px; color:#000;">
+  Resumen: {{ total_cajas }} cajas, {{ ns.docs }} documentos
+</div>
+
 <div class="archivador-actions">
   <a href="{{ url_for('archivo') }}?view=normal">Dashboard normal</a>
-  <button type="button" onclick="abrirModal()">Mover seleccion</button>
-  <button type="button" onclick="abrirModalEliminar()">Eliminar seleccion</button>
+  <button type="button" class="btn-primary" onclick="abrirModal()">Mover seleccion</button>
+  <button type="button" class="btn-danger" onclick="abrirModalEliminar()">Eliminar seleccion</button>
   <span class="muted" id="selInfo">Seleccionados: 0 cajas, 0 archivos</span>
 </div>
 
 <div class="lista-cajas">
   {% for c in cajas %}
-  <div class="caja-item">
+  <div class="caja-item {% if c.is_pendiente %}caja-pendiente{% endif %}">
     <details>
       <summary>
-        <input type="checkbox" class="chk-caja" value="{{ c.id }}" onchange="actualizarSeleccion()"
-               {% if c.is_pendiente %}disabled{% endif %}>
-        {% if c.is_pendiente %}
-          Caja 0 (Pendiente)
-        {% else %}
-          Caja {{ loop.index }} (Rango {{ c.rango_min }} - {{ c.rango_max }})
-        {% endif %}
-        {% if c.grupo_origen_id %}<span class="muted"> | Origen: {{ c.grupo_origen_id }}</span>{% endif %}
+        <div class="caja-header">
+          <input type="checkbox" class="chk-caja" value="{{ c.id }}" onchange="actualizarSeleccion()"
+                 {% if c.is_pendiente %}disabled{% endif %}>
+          {% if c.is_pendiente %}
+            <span class="box-title">Caja 0</span>
+            <span class="badge badge-muted">Pendiente</span>
+          {% else %}
+            <span class="box-title">Caja {{ loop.index }}</span>
+            <span class="badge">Rango {{ c.rango_min }} - {{ c.rango_max }}</span>
+          {% endif %}
+          {% if c.grupo_origen_id %}
+            <span class="badge badge-origin">Origen: {{ c.grupo_origen_nombre or c.grupo_origen_id }}</span>
+          {% endif %}
+        </div>
       </summary>
 
       {% if c.archivos and c.archivos|length > 0 %}
       <table class="archivador-table">
         <tr>
-          <th></th>
-          <th>Documento</th>
-          <th>Nombre</th>
-          <th>PDF</th>
-          <th>Origen</th>
+          <th class="col-select">
+            <input type="checkbox" class="chk-caja-archivos" data-caja-id="{{ c.id }}"
+                   onchange="toggleCajaArchivos('{{ c.id }}', this)">
+            <span>Seleccionar todos</span>
+          </th>
+          <th class="col-doc">Documento</th>
+          <th class="col-name">Nombre</th>
+          <th class="col-pdf">PDF</th>
+          <th class="col-origen">Origen</th>
         </tr>
         {% for a in c.archivos %}
         <tr>
-          <td><input type="checkbox" class="chk-archivo" value="{{ a.id }}" onchange="actualizarSeleccion()"></td>
-          <td>{{ a.numero }}</td>
-          <td>{{ a.nombre }}</td>
-          <td>{{ "Si" if a.pdf_path else "No" }}</td>
-          <td>{{ a.grupo_origen_id or "-" }}</td>
+          <td class="col-select">
+            <input type="checkbox" class="chk-archivo" data-caja-id="{{ c.id }}"
+                   value="{{ a.id }}" onchange="actualizarSeleccion()">
+          </td>
+          <td class="col-doc">{{ a.numero }}</td>
+          <td class="col-name">{{ a.nombre }}</td>
+          <td class="col-pdf">{{ "Si" if a.pdf_path else "No" }}</td>
+          <td class="col-origen">{{ a.grupo_origen_nombre or a.grupo_origen_id or "-" }}</td>
         </tr>
         {% endfor %}
       </table>
@@ -125,6 +171,29 @@ function actualizarSeleccion() {
   if (info) {
     info.textContent = "Seleccionados: " + cajas.length + " cajas, " + archivos.length + " archivos";
   }
+  syncHeaderCheckboxes();
+}
+
+function toggleCajaArchivos(cajaId, header) {
+  const items = document.querySelectorAll(".chk-archivo[data-caja-id='" + cajaId + "']");
+  items.forEach(i => { i.checked = header.checked; });
+  actualizarSeleccion();
+}
+
+function syncHeaderCheckboxes() {
+  const headers = document.querySelectorAll(".chk-caja-archivos");
+  headers.forEach(h => {
+    const cajaId = h.getAttribute("data-caja-id");
+    const items = document.querySelectorAll(".chk-archivo[data-caja-id='" + cajaId + "']");
+    if (!items.length) {
+      h.checked = false;
+      h.indeterminate = false;
+      return;
+    }
+    const checked = Array.from(items).filter(i => i.checked).length;
+    h.checked = checked === items.length;
+    h.indeterminate = checked > 0 && checked < items.length;
+  });
 }
 
 function abrirModal() {

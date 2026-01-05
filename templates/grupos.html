@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
 <style>
@@ -24,6 +24,25 @@
   }
   .modal h4 { margin: 0 0 10px; }
   .modal .actions { display:flex; justify-content:flex-end; margin-top: 12px; }
+  .user-item { display:block; padding:4px 0; border-bottom:1px solid #000; }
+  .user-item:last-child { border-bottom:none; }
+  .empresa-actions { white-space:nowrap; }
+  .empresa-actions form { display:inline-block; margin:0; }
+  .empresa-actions .btn {
+    min-width:120px;
+    text-align:center;
+    height:34px;
+    padding:0 10px;
+    font-size:13px;
+    line-height:1;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    vertical-align:middle;
+  }
+  .empresa-actions .btn-link { height:30px; }
+  .action-buttons { display:flex; gap:8px; align-items:center; }
+  .action-buttons .btn { min-width:120px; text-align:center; }
 </style>
 
 {% if es_admin %}
@@ -65,6 +84,7 @@
   <tr>
     {% if es_admin %}
       <th>Empresa</th>
+      <th>Usuarios</th>
       <th>Accion</th>
     {% else %}
       <th>Usuario</th>
@@ -77,13 +97,22 @@
   <tr>
     {% if es_admin %}
       <td>{{ g[1] }}</td>
-      <td>
-        <button type="button" onclick="abrirModal('{{ g[0] }}')">Modificar</button>
-        <a href="{{ url_for('admin_abrir_grupo', grupo_id=g[0]) }}">Ver contenido</a>
-        <form method="post" style="display:inline;" onsubmit="return confirm('¿Seguro que deseas eliminar este grupo?');">
+      <td class="empresa-actions">
+        {% if g[2] and g[2]|length > 0 %}
+          {% for m in g[2] %}
+            <span class="user-item">{{ m[1] }} ({{ m[2] }})</span>
+          {% endfor %}
+        {% else %}
+          Sin integrantes
+        {% endif %}
+      </td>
+      <td class="empresa-actions">
+        <button type="button" class="btn" onclick="abrirModal('{{ g[0] }}')">Modificar</button>
+          <a class="btn btn-link" href="{{ url_for('admin_abrir_grupo', grupo_id=g[0]) }}">Ver contenido</a>
+        <form method="post" onsubmit="return confirm('Â¿Seguro que deseas eliminar este grupo?');">
           <input type="hidden" name="accion" value="eliminar_grupo">
           <input type="hidden" name="grupo_id" value="{{ g[0] }}">
-          <button type="submit">Eliminar</button>
+          <button type="submit" class="btn">Eliminar</button>
         </form>
       </td>
     {% else %}
@@ -165,10 +194,10 @@
       <tr>
         <td>{{ m[1] }}</td>
         <td>
-          <input type="checkbox" form="form-{{ g[0] }}-{{ m[0] }}" name="puede_eliminar" value="1" {% if m[2] %}checked{% endif %}>
+          <input type="checkbox" form="form-{{ g[0] }}-{{ m[0] }}" name="puede_eliminar" value="1" {% if m[3] %}checked{% endif %}>
         </td>
         <td>
-          <input type="checkbox" form="form-{{ g[0] }}-{{ m[0] }}" name="puede_editar" value="1" {% if m[3] %}checked{% endif %}>
+          <input type="checkbox" form="form-{{ g[0] }}-{{ m[0] }}" name="puede_editar" value="1" {% if m[4] %}checked{% endif %}>
         </td>
         <td>
           <form method="post" id="form-{{ g[0] }}-{{ m[0] }}">
@@ -177,7 +206,7 @@
             <input type="hidden" name="usuario_id" value="{{ m[0] }}">
             <button type="submit">Guardar</button>
           </form>
-          <form method="post" style="display:inline;" onsubmit="return confirm('¿Quitar usuario del grupo?');">
+          <form method="post" onsubmit="return confirm('Â¿Quitar usuario del grupo?');">
             <input type="hidden" name="accion" value="quitar_usuario">
             <input type="hidden" name="grupo_id" value="{{ g[0] }}">
             <input type="hidden" name="usuario_id" value="{{ m[0] }}">
@@ -241,3 +270,7 @@ document.addEventListener("keydown", function(e){
 </script>
 
 {% endblock %}
+
+
+
+

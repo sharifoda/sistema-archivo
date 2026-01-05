@@ -1,3 +1,8 @@
+a {
+    color: #000;
+    text-decoration: none;
+}
+
 body {
     font-family: Arial, sans-serif;
     margin: 30px;
@@ -19,6 +24,11 @@ nav a {
     margin-right: 10px;
     text-decoration: none;
     color: #000000;
+}
+
+hr {
+    border: 0;
+    border-top: 1px solid #000;
 }
 
 table {

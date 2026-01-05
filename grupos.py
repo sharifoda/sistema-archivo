@@ -99,7 +99,7 @@ def obtener_miembros_grupo(grupo_id):
 
     cur.execute(
         """
-        SELECT u.id, u.usuario, ug.puede_eliminar, ug.puede_editar
+        SELECT u.id, u.usuario, u.rol, ug.puede_eliminar, ug.puede_editar
         FROM usuarios_grupos ug
         JOIN usuarios u ON u.id = ug.usuario_id
         WHERE ug.grupo_id = %s
@@ -332,7 +332,7 @@ def archivar_grupo(grupo_id, admin_user_id):
         """
         UPDATE cajas
         SET grupo_id = %s,
-            grupo_origen_id = COALESCE(grupo_origen_id, %s)
+            grupo_origen_id = %s
         WHERE grupo_id = %s
         """,
         (arch_id, grupo_id, grupo_id)
@@ -343,7 +343,7 @@ def archivar_grupo(grupo_id, admin_user_id):
         """
         UPDATE archivos
         SET grupo_id = %s,
-            grupo_origen_id = COALESCE(grupo_origen_id, %s)
+            grupo_origen_id = %s
         WHERE grupo_id = %s
         """,
         (arch_id, grupo_id, grupo_id)

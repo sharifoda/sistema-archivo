@@ -33,6 +33,7 @@ from werkzeug.security import generate_password_hash
 from db import get_db
 from io import BytesIO
 from datetime import datetime
+from collections import defaultdict
 from openpyxl.styles import Font
 from flask import flash
 
@@ -293,6 +294,7 @@ def grupos():
                 nuevo_rol = request.form.get("rol", "").strip()
                 nueva_password = request.form.get("password", "").strip()
                 nuevo_grupo_id = int(request.form.get("grupo_id"))
+                return_to = request.form.get("return_to", "")
 
                 conn = get_db()
                 cur = conn.cursor()
@@ -333,7 +335,12 @@ def grupos():
                     current = cur.fetchone()
                     current_group_id = current[0] if current else None
 
-                    if current_group_id != nuevo_grupo_id:
+                    if nuevo_grupo_id == 0:
+                        cur.execute(
+                            "DELETE FROM usuarios_grupos WHERE usuario_id = %s",
+                            (usuario_id,)
+                        )
+                    elif current_group_id != nuevo_grupo_id:
                         cur.execute(
                             "DELETE FROM usuarios_grupos WHERE usuario_id = %s",
                             (usuario_id,)
@@ -354,9 +361,12 @@ def grupos():
                 finally:
                     cur.close()
                     conn.close()
+                if return_to == "admin_logs_usuarios":
+                    return redirect(url_for("admin_logs", tab="usuarios"))
 
             if accion == "eliminar_usuario":
                 usuario_id = int(request.form.get("usuario_id"))
+                return_to = request.form.get("return_to", "")
                 if usuario_id == session.get("usuario_id"):
                     flash("No puedes eliminar tu propio usuario.", "error")
                     return redirect(url_for("grupos"))
@@ -375,6 +385,8 @@ def grupos():
                 cur.close()
                 conn.close()
                 flash("Usuario eliminado correctamente.", "success")
+                if return_to == "admin_logs_usuarios":
+                    return redirect(url_for("admin_logs", tab="usuarios"))
 
             return redirect(url_for("grupos"))
 
@@ -656,6 +668,8 @@ def archivos():
         if accion == "agregar":
             numero = int(request.form["numero"])
             nombre = request.form.get("nombre", "").strip()
+            if not nombre:
+                nombre = f"Documento {numero}"
 
             agregar_archivo(numero, nombre, grupo_id, creado_por=session.get("usuario_id"))
 
@@ -1012,6 +1026,9 @@ def archivo():
         )
         grupos_destino = cur.fetchall()
 
+        cur.execute("SELECT id, nombre FROM grupos")
+        grupos_nombres = {r[0]: r[1] for r in cur.fetchall()}
+
         cur.close()
         conn.close()
 
@@ -1023,6 +1040,7 @@ def archivo():
                 "rango_max": c[2],
                 "is_pendiente": c[3],
                 "grupo_origen_id": c[4],
+                "grupo_origen_nombre": grupos_nombres.get(c[4]),
                 "archivos": []
             }
 
@@ -1043,6 +1061,7 @@ def archivo():
                 "nombre": a[2],
                 "pdf_path": a[4],
                 "grupo_origen_id": a[5],
+                "grupo_origen_nombre": grupos_nombres.get(a[5]),
             })
 
         cajas_list = []
@@ -1881,6 +1900,11 @@ def admin_logs():
 
     registros = cur.fetchall()
 
+    logs_por_grupo = defaultdict(list)
+    for r in registros:
+        grupo_nombre = r[4] or "Sin empresa"
+        logs_por_grupo[grupo_nombre].append(r)
+
     cur.execute("""
         SELECT
             m.id,
@@ -1900,6 +1924,11 @@ def admin_logs():
         LIMIT 200
     """)
     movimientos = cur.fetchall()
+
+    movimientos_por_grupo = defaultdict(list)
+    for m in movimientos:
+        grupo_nombre = m[3] or "Sin empresa"
+        movimientos_por_grupo[grupo_nombre].append(m)
 
     cur.execute("""
         SELECT
@@ -1932,6 +1961,8 @@ def admin_logs():
         "admin_logs.html",
         registros=registros,
         movimientos=movimientos,
+        logs_por_grupo=logs_por_grupo,
+        movimientos_por_grupo=movimientos_por_grupo,
         usuarios=usuarios,
         grupos_todos=grupos_todos
     )

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -9,6 +9,10 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+        }
+        #logout-link {
+            color: #000;
+            text-decoration: none;
         }
         .flash {
             list-style: none;
@@ -35,14 +39,14 @@
     {% if session.get("usuario") %}
         <div>
             {{ session["usuario"] }} |
-            <a href="{{ url_for('logout') }}">Cerrar sesión</a>
+            <a id="logout-link" href="{{ url_for('logout') }}">Cerrar sesion</a>
         </div>
     {% endif %}
 </header>
 
 <hr>
 
-<!-- ✅ Mensajes Flash -->
+<!-- âœ… Mensajes Flash -->
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
     <ul class="flash">
@@ -83,3 +87,4 @@
 
 </body>
 </html>
+

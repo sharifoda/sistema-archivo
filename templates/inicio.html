@@ -21,7 +21,7 @@
 
 <div style="display:flex; gap:12px; margin-top:20px; flex-wrap:wrap;">
     <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
-        <strong>Archivos</strong>
+        <strong>Documentos</strong>
         <div style="font-size:24px; margin-top:6px;">{{ total_archivos }}</div>
     </div>
     <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
@@ -35,7 +35,7 @@
 </div>
 
 <div style="margin-top: 20px; display:flex; gap:10px; flex-wrap:wrap;">
-    <a class="btn" href="{{ url_for('archivo') }}">📦 Ir a Archivo</a>
+    <a class="btn" href="{{ url_for('archivo') }}">📂 Ir a Archivo</a>
     {% if session.get("rol") in ["admin", "supervisor"] %}
       <a class="btn" href="{{ url_for('grupos') }}">👥 Ir a Empresa</a>
     {% endif %}

@@ -20,8 +20,8 @@
     opacity:.55;
     cursor:not-allowed;
   }
-  .row-highlight{
-    background:#fff5a5;
+  .row-highlight td{
+    background:#fff3a0 !important;
   }
 
   /* Modal genérico */
@@ -66,7 +66,7 @@
 
 <hr>
 
-<h3>📦 Archivos en esta caja</h3>
+<h3>📄 Documentos en esta caja</h3>
 
 {% if archivos and archivos|length > 0 %}
 <table border="1" cellpadding="8" cellspacing="0">
@@ -173,7 +173,10 @@
       Eliminar PDF actual
     </label>
 
-    <button type="submit">Modificar</button>
+    <div class="actions">
+      <button class="btn" type="button" onclick="cerrarModalArchivo()">Cancelar</button>
+      <button class="btn" type="submit">Modificar</button>
+    </div>
   </form>
 </div>
 

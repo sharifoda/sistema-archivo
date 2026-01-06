@@ -136,6 +136,7 @@
   <h3>Importar Excel</h3>
 
   <form method="post" enctype="multipart/form-data">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="importar_excel">
 
     <label>Archivo Excel</label><br>
@@ -154,6 +155,7 @@
   <h3>📦 Crear caja</h3>
 
   <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="crear_caja">
 
     <label>Rango minimo</label><br>
@@ -175,6 +177,7 @@
   <h3>📄 Agregar documento</h3>
 
   <form method="post" enctype="multipart/form-data">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="agregar_documento">
 
     <label>Documento (numero)</label><br>
@@ -212,6 +215,7 @@
   <p style="margin:6px 0 12px; color:#555;" id="editarInfo"></p>
 
   <form method="post" enctype="multipart/form-data">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="modificar_archivo_modal">
     <input type="hidden" name="numero_old" id="numero_old">
 
@@ -224,7 +228,7 @@
     <label>PDF (opcional)</label><br>
     <input type="file" name="pdf" accept="application/pdf"><br><br>
 
-    <!-- âœ… NUEVO: eliminar PDF actual -->
+    <!-- ✅ NUEVO: eliminar PDF actual -->
     <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
       <input type="checkbox" name="remove_pdf" value="1">
       Eliminar PDF actual (si existe)
@@ -239,7 +243,7 @@
 </div>
 
 <!-- =========================
-     âœ… Server data (sin <script>)
+     ✅ Server data (sin <script>)
      ========================= -->
 <div id="server-data"
      data-json='{{ {
@@ -249,9 +253,10 @@
      } | tojson }}'>
 </div>
 
-<!-- âœ… JS externo (no rojo) -->
+<!-- ✅ JS externo (no rojo) -->
 <script src="{{ url_for('static', filename='archivo_dashboard.js') }}"></script>
 
 {% endblock %}
+
 
 

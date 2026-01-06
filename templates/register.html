@@ -1,20 +1,21 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}Registro{% endblock %}
 
 {% block content %}
 
-<h2>📝 Crear cuenta</h2>
+<h2>ðŸ“ Crear cuenta</h2>
 
 {% if error %}
     <p style="color:red;"><strong>{{ error }}</strong></p>
 {% endif %}
 
 <form method="POST">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <label>Usuario</label><br>
     <input type="text" name="usuario" required><br><br>
 
-    <label>Contraseña</label><br>
+    <label>ContraseÃ±a</label><br>
     <input type="password" name="password" required><br><br>
 
     <button type="submit">Registrar</button>
@@ -22,6 +23,7 @@
 
 <br>
 
-<a href="{{ url_for('login') }}">← Volver al login</a>
+<a href="{{ url_for('login') }}">⬅️ Volver al login</a>
 
 {% endblock %}
+

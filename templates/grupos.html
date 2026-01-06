@@ -54,6 +54,7 @@
 {% if es_admin %}
   <h3>Crear empresa</h3>
   <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="crear_grupo">
     <input type="text" name="nombre" placeholder="Nombre de la empresa" required>
     <button type="submit">Crear</button>
@@ -62,6 +63,7 @@
 
   <h3>Crear usuario</h3>
   <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="crear_usuario">
     <input type="text" name="usuario" placeholder="Usuario" required>
     <input type="password" name="password" placeholder="Contrasena" required>
@@ -109,7 +111,8 @@
       <td class="empresa-actions">
         <button type="button" class="btn" onclick="abrirModal('{{ g[0] }}')">Modificar</button>
           <a class="btn btn-link" href="{{ url_for('admin_abrir_grupo', grupo_id=g[0]) }}">Ver contenido</a>
-        <form method="post" onsubmit="return confirm('Â¿Seguro que deseas eliminar este grupo?');">
+        <form method="post" onsubmit="return confirm('¿Seguro que deseas eliminar este grupo?');">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
           <input type="hidden" name="accion" value="eliminar_grupo">
           <input type="hidden" name="grupo_id" value="{{ g[0] }}">
           <button type="submit" class="btn">Eliminar</button>
@@ -201,12 +204,14 @@
         </td>
         <td>
           <form method="post" id="form-{{ g[0] }}-{{ m[0] }}">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
             <input type="hidden" name="accion" value="actualizar_permiso">
             <input type="hidden" name="grupo_id" value="{{ g[0] }}">
             <input type="hidden" name="usuario_id" value="{{ m[0] }}">
             <button type="submit">Guardar</button>
           </form>
-          <form method="post" onsubmit="return confirm('Â¿Quitar usuario del grupo?');">
+          <form method="post" onsubmit="return confirm('¿Quitar usuario del grupo?');">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
             <input type="hidden" name="accion" value="quitar_usuario">
             <input type="hidden" name="grupo_id" value="{{ g[0] }}">
             <input type="hidden" name="usuario_id" value="{{ m[0] }}">
@@ -222,6 +227,7 @@
 
     <h5>Agregar usuario</h5>
     <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
       <input type="hidden" name="accion" value="agregar_usuario">
       <input type="hidden" name="grupo_id" value="{{ g[0] }}">
       <input type="text" name="usuario" placeholder="Usuario" required>
@@ -270,6 +276,7 @@ document.addEventListener("keydown", function(e){
 </script>
 
 {% endblock %}
+
 
 
 

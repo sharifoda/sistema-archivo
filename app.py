@@ -1,4 +1,4 @@
-print(">>> APP.PY CORRECTO CARGADO <<<")
+﻿print(">>> APP.PY CORRECTO CARGADO <<<")
 import os
 from werkzeug.utils import secure_filename
 from flask import send_file, send_from_directory
@@ -45,7 +45,39 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
 
-app.secret_key = "clave_super_secreta"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "clave_super_secreta")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_SECURE_COOKIES") == "1"
+
+def csrf_token():
+    token = session.get("_csrf_token")
+    if not token:
+        token = os.urandom(16).hex()
+        session["_csrf_token"] = token
+    return token
+
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": csrf_token}
+
+@app.before_request
+def csrf_protect():
+    if request.method == "POST":
+        sent = request.form.get("_csrf_token")
+        if not sent or sent != session.get("_csrf_token"):
+            flash("Sesion invalida. Recarga e intenta de nuevo.", "error")
+            return redirect(request.referrer or url_for("inicio"))
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+@app.template_filter("puntos")
+def formato_puntos(valor):
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        return valor
+    return f"{numero:,}".replace(",", ".")
 
 def es_pdf(file):
     if not file:
@@ -154,7 +186,7 @@ def register():
         # Intento de crear usuario (debe devolver True/False si usas el auth.py mejorado)
         user_id = crear_usuario(usuario, password, rol="cliente")
 
-        # Si tu crear_usuario no devuelve nada (None), lo tratamos como éxito
+        # Si tu crear_usuario no devuelve nada (None), lo tratamos como Ã©xito
         if user_id is False:
             return render_template("register.html", error="El usuario ya existe")
 
@@ -171,7 +203,7 @@ def register():
 # ---------------- LOGOUT ----------------
 @app.route("/logout")
 def logout():
-    # LOG: LOGOUT (antes de borrar sesión)
+    # LOG: LOGOUT (antes de borrar sesiÃ³n)
     registrar_log(
         session.get("usuario_id"),
         "LOGOUT",
@@ -532,12 +564,12 @@ def cajas():
 
             if total_movidos > 0:
                 flash(
-                    f"Se reasignaron automáticamente {total_movidos} archivo(s) según el nuevo rango.",
+                    f"Se reasignaron automÃ¡ticamente {total_movidos} archivo(s) segÃºn el nuevo rango.",
                     "success"
                 )
             else:
                 flash(
-                    "El rango se actualizó. No fue necesario reasignar archivos.",
+                    "El rango se actualizÃ³. No fue necesario reasignar archivos.",
                     "info"
                 )
 
@@ -590,7 +622,7 @@ def cajas():
             return redirect(url_for("cajas"))
 
         # Si llega algo raro:
-        flash("Acción no válida.", "error")
+        flash("AcciÃ³n no vÃ¡lida.", "error")
         return redirect(url_for("cajas"))
 
     # ======================
@@ -636,7 +668,7 @@ def cajas():
     cur.close()
     conn.close()
 
-    # Ocultar Caja 0 si está vacía
+    # Ocultar Caja 0 si estÃ¡ vacÃ­a
     cajas_filtradas = []
     for c in cajas_data:
         if c[5] and c[1] == 0:
@@ -664,7 +696,7 @@ def archivos():
         accion = request.form["accion"]
 
 
-        # ✅ AGREGAR (formulario de arriba)
+        # âœ… AGREGAR (formulario de arriba)
         if accion == "agregar":
             numero = int(request.form["numero"])
             nombre = request.form.get("nombre", "").strip()
@@ -696,7 +728,7 @@ def archivos():
 
             return redirect(url_for("archivos"))
 
-       # ✅ MODIFICAR DESDE FILA (popup)
+       # âœ… MODIFICAR DESDE FILA (popup)
         if accion == "modificar_fila":
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
@@ -767,7 +799,7 @@ def archivos():
             return redirect(url_for("archivos"))
 
 
-        # ✅ ELIMINAR DESDE FILA
+        # âœ… ELIMINAR DESDE FILA
         if accion == "eliminar_fila":
             numero = int(request.form["numero"])
 
@@ -801,11 +833,11 @@ def archivos():
 
             return redirect(url_for("archivos"))
 
-        # Si llega una acción desconocida:
+        # Si llega una acciÃ³n desconocida:
         return redirect(url_for("archivos"))
 
     # =========================
-    # GET: listado + búsqueda + últimos movimientos + modo edición
+    # GET: listado + bÃºsqueda + Ãºltimos movimientos + modo ediciÃ³n
     # =========================
     conn = get_db()
     cur = conn.cursor()
@@ -885,11 +917,11 @@ def archivos():
             if not resultado:
                 resultado = ("no",)
 
-    # Modo edición (qué documento está en edición)
+    # Modo ediciÃ³n (quÃ© documento estÃ¡ en ediciÃ³n)
     edit_num = request.args.get("edit", "").strip()
     edit_num = int(edit_num) if edit_num.isdigit() else None
 
-    # Últimos movimientos (10)
+    # Ãšltimos movimientos (10)
     cur.execute("""
         WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
@@ -925,28 +957,28 @@ def archivos():
 
             CASE
                 WHEN b.tipo_raw = 'REGISTRO' THEN 'Registro'
-                WHEN b.tipo_raw = 'MODIFICACION' THEN 'Modificación'
-                WHEN b.tipo_raw = 'ELIMINACION' THEN 'Eliminación'
+                WHEN b.tipo_raw = 'MODIFICACION' THEN 'ModificaciÃ³n'
+                WHEN b.tipo_raw = 'ELIMINACION' THEN 'EliminaciÃ³n'
                 ELSE 'Otro'
             END AS tipo,
 
             CASE
                 WHEN b.tipo_raw = 'REGISTRO' THEN
-                    'Se registró el documento y el nombre.'
+                    'Se registrÃ³ el documento y el nombre.'
                 WHEN b.tipo_raw = 'ELIMINACION' THEN
-                    'Se eliminó el documento y su nombre.'
+                    'Se eliminÃ³ el documento y su nombre.'
                 WHEN b.tipo_raw = 'MODIFICACION' THEN
                     TRIM(
                         BOTH ', ' FROM
                         (CASE
                             WHEN b.numero_old IS NOT NULL AND b.numero_new IS NOT NULL AND b.numero_old <> b.numero_new
-                            THEN 'Documento: ' || b.numero_old || ' → ' || b.numero_new || ', '
+                            THEN 'Documento: ' || b.numero_old || ' â†’ ' || b.numero_new || ', '
                             ELSE ''
                         END)
                         ||
                         (CASE
                             WHEN COALESCE(b.nombre_old,'') <> COALESCE(b.nombre_new,'')
-                            THEN 'Nombre: ' || COALESCE(b.nombre_old,'') || ' → ' || COALESCE(b.nombre_new,'')
+                            THEN 'Nombre: ' || COALESCE(b.nombre_old,'') || ' â†’ ' || COALESCE(b.nombre_new,'')
                             ELSE ''
                         END)
                     )
@@ -1244,10 +1276,10 @@ def archivo():
                 LIMIT 1
             """, (grupo_id, numero))
             caja_dest = cur.fetchone()
-            caja_id = caja_dest[0] if caja_dest else asegurar_caja_sin_asignar(grupo_id)  # ✅ si no cae en ninguna caja → 0
+            caja_id = caja_dest[0] if caja_dest else asegurar_caja_sin_asignar(grupo_id)  # âœ… si no cae en ninguna caja â†’ 0
 
             # 2) Insertar archivo YA con caja_id
-            # (si tu tabla tiene otras columnas obligatorias, aquí se ajusta, pero esto es lo normal)
+            # (si tu tabla tiene otras columnas obligatorias, aquÃ­ se ajusta, pero esto es lo normal)
             cur.execute("""
                 INSERT INTO archivos (caja_id, numero, nombre, pdf_path, grupo_id, creado_por)
                 VALUES (%s, %s, %s, NULL, %s, %s)
@@ -1300,7 +1332,7 @@ def archivo():
             flash("Documento agregado correctamente.", "success")
             return redirect(url_for("archivo"))
 
-        # ---------- Eliminar Archivo (desde modal de búsqueda) ----------
+        # ---------- Eliminar Archivo (desde modal de bÃºsqueda) ----------
         elif accion == "eliminar_archivo_modal":
             numero = int(request.form["numero"])
 
@@ -1340,7 +1372,7 @@ def archivo():
             cur.close()
             conn.close()
 
-            # borrar PDF del disco si existía
+            # borrar PDF del disco si existÃ­a
             if antes:
 
                 if pdf_old:
@@ -1363,7 +1395,7 @@ def archivo():
             flash("Archivo eliminado correctamente.", "success")
             return redirect(url_for("archivo"))
 
-        # ---------- Modificar Archivo (desde modal de búsqueda) ----------
+        # ---------- Modificar Archivo (desde modal de bÃºsqueda) ----------
         elif accion == "modificar_archivo_modal":
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
@@ -1384,12 +1416,12 @@ def archivo():
             if not antes:
                 cur.close()
                 conn.close()
-                flash("No se encontró el archivo a modificar.", "error")
+                flash("No se encontrÃ³ el archivo a modificar.", "error")
                 return redirect(url_for("archivo"))
 
             archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old = antes
 
-            # Caja destino según rangos del numero_new
+            # Caja destino segÃºn rangos del numero_new
             cur.execute("""
                 SELECT id
                 FROM cajas
@@ -1404,7 +1436,7 @@ def archivo():
 
             pdf_name = pdf_old
 
-            # 1) eliminar PDF actual si se pidió
+            # 1) eliminar PDF actual si se pidiÃ³
             if remove_pdf and pdf_old:
                 try:
                     path = pdf_old
@@ -1426,7 +1458,7 @@ def archivo():
                     flash("El archivo debe ser PDF.", "error")
                     return redirect(url_for("archivo"))
 
-                # si había anterior y no se eliminó arriba, lo borramos
+                # si habÃ­a anterior y no se eliminÃ³ arriba, lo borramos
                 if pdf_old and not remove_pdf:
                     try:
                         old_path = pdf_old
@@ -1482,9 +1514,9 @@ def archivo():
             flash("Archivo modificado correctamente.", "success")
             return redirect(url_for("archivo"))
 
-        # Acción desconocida
+        # AcciÃ³n desconocida
         else:
-            flash("Acción no reconocida.", "error")
+            flash("AcciÃ³n no reconocida.", "error")
             return redirect(url_for("archivo"))
 
     # =========================================================
@@ -1626,7 +1658,7 @@ def archivo_caja(caja_id):
 
             modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
 
-            # Reubicar archivos según nuevo rango
+            # Reubicar archivos segÃºn nuevo rango
             movidos_fuera = reubicar_archivos_de_caja(caja_id, grupo_id, session.get("usuario_id"))
             movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(
                 caja_id,
@@ -1643,9 +1675,9 @@ def archivo_caja(caja_id):
             )
 
             if total > 0:
-                flash(f"Se reasignaron automáticamente {total} archivo(s) según el nuevo rango.", "success")
+                flash(f"Se reasignaron automÃ¡ticamente {total} archivo(s) segÃºn el nuevo rango.", "success")
             else:
-                flash("El rango se actualizó. No fue necesario reasignar archivos.", "info")
+                flash("El rango se actualizÃ³. No fue necesario reasignar archivos.", "info")
 
             return redirect(url_for("archivo_caja", caja_id=caja_id))
 
@@ -1753,7 +1785,7 @@ def archivo_caja(caja_id):
 
             pdf_name = pdf_old
 
-            # 🗑️ Eliminar PDF actual
+            # ðŸ—‘ï¸ Eliminar PDF actual
             if remove_pdf and pdf_old:
                 try:
                     path = pdf_old
@@ -1766,7 +1798,7 @@ def archivo_caja(caja_id):
 
                 pdf_name = None
 
-            # 📄 Reemplazar / subir PDF nuevo
+            # ðŸ“„ Reemplazar / subir PDF nuevo
             if file and file.filename:
                 if not es_pdf(file):
                     cur.close()
@@ -1774,7 +1806,7 @@ def archivo_caja(caja_id):
                     flash("El archivo debe ser PDF.", "error")
                     return redirect(url_for("archivo_caja", caja_id=caja_id))
 
-                # borrar anterior si existía
+                # borrar anterior si existÃ­a
                 if pdf_old and not remove_pdf:
                     try:
                         old_path = pdf_old
@@ -2386,19 +2418,51 @@ def export_excel():
         # Caja 0 al final, sin rango
         ws1.append([0, "", total_caja0])
 
-    # ---- Hoja 2: Archivos ----
+    # ---- Hoja 2: Archivos (en bloques por caja) ----
     ws2 = wb.create_sheet("Archivos")
-    ws2.append(["Caja", "Número", "Nombre", "PDF"])
+    bloques_por_fila = 10
+    encabezados_bloque = ["Caja", "Numero", "Nombre", "PDF"]
+    separador = ""
 
-    # Insertar filas en blanco al cambiar de caja (como tu imagen)
-    last_caja = None
+    # Agrupar por caja
+    archivos_por_caja = {}
     for (caja_num, numero, nombre, pdf) in archivos:
-        if last_caja is not None and caja_num != last_caja:
-            ws2.append([])  # fila en blanco entre cajas
-        ws2.append([caja_num, numero, nombre, pdf])
-        last_caja = caja_num
+        archivos_por_caja.setdefault(caja_num, []).append((numero, nombre, pdf))
 
-    # Auto-width básico (opcional)
+    cajas_orden = list(archivos_por_caja.keys())
+    cajas_orden.sort(key=lambda x: (x == 0, x))
+
+    for start in range(0, len(cajas_orden), bloques_por_fila):
+        bloque_cajas = cajas_orden[start:start + bloques_por_fila]
+
+        # Encabezados por bloque
+        header_row = []
+        for _ in bloque_cajas:
+            header_row.extend(encabezados_bloque)
+            header_row.append(separador)
+        ws2.append(header_row)
+
+        # Filas de datos (toma el maximo de cada bloque)
+        max_len = 0
+        for caja_num in bloque_cajas:
+            max_len = max(max_len, len(archivos_por_caja.get(caja_num, [])))
+
+        for idx in range(max_len):
+            row = []
+            for caja_num in bloque_cajas:
+                items = archivos_por_caja.get(caja_num, [])
+                if idx < len(items):
+                    numero, nombre, pdf = items[idx]
+                    row.extend([caja_num, numero, nombre, pdf])
+                else:
+                    row.extend(["", "", "", ""])
+                row.append(separador)
+            ws2.append(row)
+
+        # Fila en blanco entre bloques
+        ws2.append([])
+
+    # Auto-width bÃ¡sico (opcional)
     for ws in [ws1, ws2]:
         for col in ws.columns:
             max_len = 0
@@ -2450,4 +2514,12 @@ def ver_pdf(numero):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=False)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
+
+@app.errorhandler(Exception)
+def handle_unhandled_exception(e):
+    app.logger.exception("Unhandled exception")
+    if login_requerido():
+        flash("Ocurrio un error interno. Intenta de nuevo.", "error")
+        return redirect(request.referrer or url_for("inicio"))
+    return "Ocurrio un error interno.", 500

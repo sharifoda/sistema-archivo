@@ -59,6 +59,12 @@ function buildPdfUrl(doc) {
   return URL_PDF_BASE.replace("/0", "/" + String(doc));
 }
 
+function formatMiles(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return value;
+  return num.toLocaleString("es-CO");
+}
+
 /* =========================
    Modal editar desde búsqueda
    ========================= */
@@ -153,7 +159,7 @@ if (resultado) {
         </tr>
         <tr>
           <td>${cajaTxt}</td>
-          <td>${BUSQ.doc}</td>
+          <td>${formatMiles(BUSQ.doc)}</td>
           <td>${BUSQ.nombre}</td>
           <td>${BUSQ.pdf ? "Sí" : "No"}</td>
           <td>

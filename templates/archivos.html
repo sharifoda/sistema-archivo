@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
 <h2>📦 Archivos</h2>
@@ -20,9 +20,9 @@
 {% if resultado %}
   <div style="margin-top:15px;">
     {% if resultado[0] == "error" %}
-      <p style="color:#b00020;">⚠️ Debes ingresar un número válido. Escribiste: <strong>{{ resultado[1] }}</strong></p>
+      <p style="color:#b00020;">⚠️ Debes ingresar un numero valido. Escribiste: <strong>{{ resultado[1] }}</strong></p>
     {% elif resultado is none %}
-      <p style="color:#b00020;">❌ No se encontró ningún archivo con ese documento.</p>
+      <p style="color:#b00020;">❌ No se encontro ningun archivo con ese documento.</p>
     {% else %}
       <h4>✅ Resultado</h4>
       <table border="1" cellpadding="8" cellspacing="0">
@@ -37,9 +37,9 @@
               {{ resultado[1] }}
             {% endif %}
           </td>
-          <td>{{ resultado[2] }}</td>
+          <td>{{ resultado[2]|puntos }}</td>
           <td>{{ resultado[3] }}</td>
-          <td>{{ "Sí" if resultado[4] else "No" }}</td>
+          <td>{{ "SÃ­" if resultado[4] else "No" }}</td>
         </tr>
       </table>
     {% endif %}
@@ -48,8 +48,8 @@
 
 <hr>
 
-<!-- ✅ ÚLTIMOS MOVIMIENTOS -->
-<h3>🕒 Últimos movimientos (Archivos)</h3>
+<!-- ✅ ULTIMOS MOVIMIENTOS -->
+<h3>🕒 Ultimos movimientos (Archivos)</h3>
 
 {% if movimientos and movimientos|length > 0 %}
 <table border="1" cellpadding="8" cellspacing="0">
@@ -59,7 +59,7 @@
         <th>Documento</th>
         <th>Nombre</th>
         <th>Movimiento</th>
-        <th>Acción</th>
+        <th>Accion</th>
     </tr>
 
     {% for m in movimientos %}
@@ -74,7 +74,7 @@
             {% endif %}
         </td>
 
-        <td>{{ m[2] }}</td>
+        <td>{{ m[2]|puntos }}</td>
         <td>{{ m[3] }}</td>
         <td>{{ m[4] }}</td>
 
@@ -92,7 +92,7 @@
     {% endfor %}
 </table>
 {% else %}
-<p style="color:#666;">Todavía no hay movimientos recientes.</p>
+<p style="color:#666;">Todavia no hay movimientos recientes.</p>
 {% endif %}
 
 <!-- ✅ MODAL DETALLE -->
@@ -184,9 +184,10 @@ document.addEventListener("keydown", function(e){
 <!-- ✅ SOLO AGREGAR -->
 <h3>➕ Registrar archivo</h3>
 <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="agregar">
 
-    <label>Documento (número)</label><br>
+    <label>Documento (numero)</label><br>
     <input type="number" name="numero" required><br><br>
 
     <label>Nombre</label><br>
@@ -197,7 +198,7 @@ document.addEventListener("keydown", function(e){
 
 <hr>
 
-<!-- ✅ MODAL PARA MODIFICAR ARCHIVO (si ya lo tienes, déjalo; si no, aquí lo dejamos igual que antes) -->
+<!-- ✅ MODAL PARA MODIFICAR ARCHIVO (si ya lo tienes, dejalo; si no, aqui lo dejamos igual que antes) -->
 <style>
   .modal2-overlay {
     display: none;
@@ -241,10 +242,11 @@ document.addEventListener("keydown", function(e){
   <p class="sub" id="modalInfo"></p>
 
   <form method="post" id="form_modificar">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="modificar_fila">
     <input type="hidden" name="numero_old" id="numero_old">
 
-    <label>Documento (nuevo)</label><br>
+    <label>Documento (numero)</label><br>
     <input type="number" name="numero_new" id="numero_new" required><br><br>
 
     <label>Nombre (nuevo)</label><br>
@@ -292,7 +294,7 @@ document.addEventListener("keydown", function(e){
         <th>Caja</th>
         <th>Documento</th>
         <th>Nombre</th>
-        <th>Acción</th>
+        <th>Accion</th>
     </tr>
 
     {% for a in archivos %}
@@ -304,7 +306,7 @@ document.addEventListener("keydown", function(e){
               {{ a[0] }}
             {% endif %}
         </td>
-        <td>{{ a[1] }}</td>
+        <td>{{ a[1]|puntos }}</td>
         <td>{{ a[2] }}</td>
         <td>
             <button type="button"
@@ -315,6 +317,7 @@ document.addEventListener("keydown", function(e){
             </button>
 
             <form method="post" style="display:inline;">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
                 <input type="hidden" name="accion" value="eliminar_fila">
                 <input type="hidden" name="numero" value="{{ a[1] }}">
                 <button type="submit"
@@ -328,3 +331,8 @@ document.addEventListener("keydown", function(e){
 </table>
 
 {% endblock %}
+
+
+
+
+

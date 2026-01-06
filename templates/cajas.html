@@ -1,16 +1,17 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
-<h2>📦 Cajas</h2>
+<h2>ðŸ“¦ Cajas</h2>
 
 <h3>➕ Crear caja</h3>
 <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="crear">
 
-    <label>Rango mínimo</label><br>
+    <label>Rango mÃ­nimo</label><br>
     <input type="number" name="rango_min" required><br><br>
 
-    <label>Rango máximo</label><br>
+    <label>Rango mÃ¡ximo</label><br>
     <input type="number" name="rango_max" required><br><br>
 
     <button type="submit">Crear caja</button>
@@ -18,7 +19,7 @@
 
 <hr>
 
-<h3>📂 Cajas registradas</h3>
+<h3>ðŸ“‚ Cajas registradas</h3>
 
 <!-- ====== ESTILOS MODAL (igual estilo que Archivos) ====== -->
 <style>
@@ -80,16 +81,17 @@
   <p class="sub" id="modalInfo"></p>
 
   <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="modificar">
     <input type="hidden" name="caja_id" id="caja_id">
 
     <div class="row">
-      <label for="rango_min">Rango mínimo</label>
+      <label for="rango_min">Rango mÃ­nimo</label>
       <input type="number" name="rango_min" id="rango_min" required>
     </div>
 
     <div class="row">
-      <label for="rango_max">Rango máximo</label>
+      <label for="rango_max">Rango mÃ¡ximo</label>
       <input type="number" name="rango_max" id="rango_max" required>
     </div>
 
@@ -112,7 +114,7 @@
     document.getElementById("rango_max").value = rmax;
 
     document.getElementById("modalInfo").innerText =
-      "Caja " + cajaVisible + " — Rango actual: " + rmin + " - " + rmax;
+      "Caja " + cajaVisible + " - Rango actual: " + rmin + " - " + rmax;
 
     document.getElementById("modalOverlay").style.display = "block";
     document.getElementById("modalEditarCaja").style.display = "block";
@@ -137,7 +139,7 @@
     <th>Caja</th>
     <th>Total</th>
     <th>Rango</th>
-    <th>Acción</th>
+    <th>AcciÃ³n</th>
   </tr>
 
   {% for c in cajas %}
@@ -154,7 +156,7 @@
       {% if c[4] == 0 %}
         Sin rango
       {% else %}
-        {{ c[2] }} - {{ c[3] }}
+        {{ c[2]|puntos }} - {{ c[3]|puntos }}
       {% endif %}
     </td>
     <td>
@@ -169,6 +171,7 @@
         </button>
 
         <form method="post" style="display:inline;">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
           <input type="hidden" name="accion" value="eliminar">
           <input type="hidden" name="caja_id" value="{{ c[0] }}">
           <button type="submit"
@@ -177,7 +180,7 @@
           </button>
         </form>
       {% else %}
-        <em>—</em>
+        <em>-</em>
       {% endif %}
     </td>
   </tr>
@@ -185,3 +188,4 @@
 </table>
 
 {% endblock %}
+

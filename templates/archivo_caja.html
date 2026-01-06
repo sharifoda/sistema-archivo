@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
 <style>
@@ -24,7 +24,7 @@
     background:#fff3a0 !important;
   }
 
-  /* Modal genérico */
+  /* Modal generico */
   .modal-overlay{
     display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
   }
@@ -47,7 +47,7 @@
 
     {% if caja[1] != 0 %}
       <p style="margin:6px 0 0; color:#555;">
-        Rango: <strong>{{ caja[2] }} - {{ caja[3] }}</strong>
+        Rango: <strong>{{ caja[2]|puntos }} - {{ caja[3]|puntos }}</strong>
         <button class="btn btn-wide" style="margin-left:10px;" type="button"
             onclick="abrirModalCaja('{{ caja[0] }}', '{{ caja[2] }}', '{{ caja[3] }}')">
             Modificar caja
@@ -60,7 +60,7 @@
   </div>
 
   <div class="right-actions">
-    <a class="btn" href="{{ url_for('archivo') }}">⬅️ Atrás</a>
+    <a class="btn" href="{{ url_for('archivo') }}">⬅️ Atras</a>
   </div>
 </div>
 
@@ -74,14 +74,14 @@
     <th>Documento</th>
     <th>Nombre</th>
     <th>PDF</th>
-    <th>Acción</th>
+    <th>Accion</th>
   </tr>
 
   {% for a in archivos %}
   <tr{% if highlight_num is not none and a[0] == highlight_num %} class="row-highlight"{% endif %}>
-    <td>{{ a[0] }}</td>
+    <td>{{ a[0]|puntos }}</td>
     <td>{{ a[1] }}</td>
-    <td>{{ "Sí" if a|length > 2 and a[2] else "No" }}</td>
+    <td>{{ "Si" if a|length > 2 and a[2] else "No" }}</td>
     <td>
       <button class="btn" type="button"
               data-numero="{{ a[0] }}"
@@ -91,6 +91,7 @@
       </button>
 
       <form method="post" style="display:inline;">
+        <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
         <input type="hidden" name="accion" value="eliminar_archivo_fila">
         <input type="hidden" name="numero" value="{{ a[0] }}">
         <button class="btn" type="submit"
@@ -122,18 +123,20 @@
   <h3>✏️ Modificar rango de caja</h3>
 
   <form method="post" id="form_modificar_caja">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="modificar_caja">
     <input type="hidden" name="caja_id" id="caja_id_modal">
 
-    <label>Rango mínimo</label><br>
+    <label>Rango minimo</label><br>
     <input type="number" name="rango_min" id="rango_min_modal" required><br><br>
 
-    <label>Rango máximo</label><br>
+    <label>Rango maximo</label><br>
     <input type="number" name="rango_max" id="rango_max_modal" required><br><br>
 
   </form>
 
   <form method="post" onsubmit="return confirm('¿Seguro que deseas eliminar esta caja?');" style="margin:12px 0;">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="eliminar_caja">
     <input type="hidden" name="caja_id" id="caja_id_modal_del">
     <button class="btn btn-danger btn-wide" type="submit">Eliminar caja</button>
@@ -153,6 +156,7 @@
   <h3>✏️ Modificar archivo</h3>
 
   <form method="post" enctype="multipart/form-data">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="modificar_archivo_fila">
 
     <input type="hidden" name="numero_old" id="numero_old">

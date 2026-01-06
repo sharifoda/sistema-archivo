@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
 <h2>Admin: Movimientos</h2>
@@ -26,6 +26,7 @@
     <td><pre>{{ m[7] }}</pre></td>
     <td>
       <form method="post" action="{{ url_for('deshacer_movimiento', mov_id=m[0]) }}">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
         <button type="submit">Deshacer</button>
       </form>
     </td>
@@ -34,3 +35,4 @@
 </table>
 
 {% endblock %}
+

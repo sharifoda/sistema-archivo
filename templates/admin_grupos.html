@@ -1,10 +1,11 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
 <h2>Admin: Grupos</h2>
 
 <h3>Crear grupo</h3>
 <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
   <input type="hidden" name="accion" value="crear_grupo">
   <input type="text" name="nombre" placeholder="Nombre del grupo" required>
   <button type="submit">Crear</button>
@@ -34,6 +35,7 @@
       <td>{{ "Si" if m[3] else "No" }}</td>
       <td>
         <form method="post" style="display:inline;">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
           <input type="hidden" name="accion" value="actualizar_permiso">
           <input type="hidden" name="grupo_id" value="{{ g[0] }}">
           <input type="hidden" name="usuario_id" value="{{ m[0] }}">
@@ -57,6 +59,7 @@
 
   <h4>Agregar usuario</h4>
   <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="agregar_usuario">
     <input type="hidden" name="grupo_id" value="{{ g[0] }}">
     <input type="text" name="usuario" placeholder="Usuario" required>
@@ -75,3 +78,4 @@
 {% endfor %}
 
 {% endblock %}
+

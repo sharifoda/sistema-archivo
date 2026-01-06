@@ -38,11 +38,22 @@
   summary::-webkit-details-marker { display: none; }
   summary .btn { display: inline-block; margin-bottom: 6px; }
   details[open] summary .btn { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-  .log-table { margin-top: 0; }
+  .log-table { margin-top: 0; width: 100%; table-layout: fixed; }
   .user-actions { display:flex; gap:8px; align-items:center; }
   .user-actions .btn { min-width:120px; text-align:center; padding:6px 10px; }
   .user-actions form { margin:0; }
   #tab-usuarios table td { padding:6px 8px; }
+  .log-table td {
+    white-space: normal;
+    word-break: break-word;
+  }
+  .log-table .col-info {
+    max-width: 420px;
+  }
+  .log-table pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 </style>
 
 <h2>Logs</h2>
@@ -61,7 +72,7 @@
       <table class="log-table" border="1" cellpadding="8" cellspacing="0">
       <tr>
         <th>Usuario</th>
-        <th>Accion</th>
+        <th class="col-info">Accion</th>
         <th>Fecha</th>
         <th>IP</th>
         <th>Empresa</th>
@@ -71,7 +82,7 @@
       {% for r in items %}
       <tr>
         <td>{{ r[0] }}</td>
-        <td>{{ r[1] }}</td>
+        <td class="col-info">{{ r[1] }}</td>
         <td>{{ r[2] }}</td>
         <td>{{ r[3] }}</td>
         <td>{{ r[4] or "Sin empresa" }}</td>
@@ -101,8 +112,8 @@
         <th>Empresa</th>
         <th>Entidad</th>
         <th>Accion</th>
-        <th>Antes</th>
-        <th>Despues</th>
+        <th class="col-info">Antes</th>
+        <th class="col-info">Despues</th>
         <th>Accion</th>
       </tr>
       {% for m in items %}
@@ -112,10 +123,11 @@
         <td>{{ m[3] or "Sin empresa" }}</td>
         <td>{{ m[4] }}</td>
         <td>{{ m[5] }}</td>
-        <td><pre>{{ m[6] }}</pre></td>
-        <td><pre>{{ m[7] }}</pre></td>
+        <td class="col-info"><pre>{{ m[6] }}</pre></td>
+        <td class="col-info"><pre>{{ m[7] }}</pre></td>
         <td>
           <form method="post" action="{{ url_for('deshacer_movimiento', mov_id=m[0]) }}">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
             <button type="submit">Deshacer</button>
           </form>
         </td>
@@ -146,6 +158,7 @@
         <div class="user-actions">
           <button type="button" class="btn" onclick="abrirUsuario('{{ u[0] }}')">Modificar</button>
           <form method="post" action="{{ url_for('grupos') }}" onsubmit="return confirm('定Eliminar este usuario?');">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
             <input type="hidden" name="accion" value="eliminar_usuario">
             <input type="hidden" name="usuario_id" value="{{ u[0] }}">
             <input type="hidden" name="return_to" value="admin_logs_usuarios">
@@ -164,6 +177,7 @@
   <h4>Modificar usuario</h4>
 
   <form method="post" action="{{ url_for('grupos') }}">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="actualizar_usuario">
     <input type="hidden" name="usuario_id" value="{{ u[0] }}">
     <input type="hidden" name="return_to" value="admin_logs_usuarios">
@@ -239,4 +253,5 @@ document.addEventListener("keydown", function(e){
 });
 </script>
 {% endblock %}
+
 

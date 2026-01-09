@@ -1928,6 +1928,17 @@ def admin_logs():
     conn = get_db()
     cur = conn.cursor()
 
+    def obtener_columnas(cur_local, tabla):
+        cur_local.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = %s
+            """,
+            (tabla,)
+        )
+        return {r[0] for r in cur_local.fetchall()}
+
     registros = []
     movimientos = []
     usuarios = []
@@ -1936,13 +1947,32 @@ def admin_logs():
     movimientos_por_grupo = defaultdict(list)
 
     try:
-        cur.execute("""
+        log_cols = obtener_columnas(cur, "logs")
+        if "fecha" in log_cols:
+            fecha_expr = "l.fecha"
+        elif "creado_en" in log_cols:
+            fecha_expr = "l.creado_en"
+        elif "created_at" in log_cols:
+            fecha_expr = "l.created_at"
+        else:
+            fecha_expr = "NULL"
+
+        if "ip" in log_cols:
+            ip_expr = "l.ip"
+        elif "ip_address" in log_cols:
+            ip_expr = "l.ip_address"
+        else:
+            ip_expr = "NULL"
+
+        order_expr = fecha_expr if fecha_expr != "NULL" else "l.id"
+
+        cur.execute(f"""
             SELECT COALESCE(u.usuario, '[eliminado]') AS usuario,
-                   l.accion, l.fecha, l.ip, g.nombre, l.grupo_id
+                   l.accion, {fecha_expr} AS fecha, {ip_expr} AS ip, g.nombre, l.grupo_id
             FROM logs l
             LEFT JOIN usuarios u ON u.id = l.usuario_id
             LEFT JOIN grupos g ON g.id = l.grupo_id
-            ORDER BY l.fecha DESC
+            ORDER BY {order_expr} DESC
             LIMIT 200
         """)
         registros = cur.fetchall()

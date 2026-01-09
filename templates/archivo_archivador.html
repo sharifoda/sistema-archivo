@@ -104,7 +104,7 @@
                    value="{{ a.id }}" onchange="actualizarSeleccion()">
           </td>
           <td class="col-doc">{{ a.numero|puntos }}</td>
-          <td class="col-name">{{ a.nombre }}</td>
+          <td class="col-name">{{ a.nombre|upper }}</td>
           <td class="col-pdf">{{ "Si" if a.pdf_path else "No" }}</td>
           <td class="col-origen">{{ a.grupo_origen_nombre or a.grupo_origen_id or "-" }}</td>
         </tr>

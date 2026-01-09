@@ -68,8 +68,13 @@ function formatMiles(value) {
 /* =========================
    Modal editar desde búsqueda
    ========================= */
-function abrirModalEditarDesdeBusqueda() {
-  if (BUSQ.doc === null) return;
+function abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId) {
+  if (doc === null || doc === undefined) return;
+
+  BUSQ.doc = doc;
+  BUSQ.nombre = nombre;
+  BUSQ.cajaNum = cajaNum;
+  BUSQ.cajaId = cajaId;
 
   document.getElementById("numero_old").value = BUSQ.doc;
   document.getElementById("numero_new").value = BUSQ.doc;
@@ -127,6 +132,74 @@ if (resultado) {
 
   // Resultado OK
   } else {
+    if (Array.isArray(resultado[0])) {
+      const rows = resultado;
+      const body = rows
+        .map(row => {
+          const cajaId = row[0];
+          const cajaNum = row[1];
+          const doc = row[2];
+          const nombre = row[3];
+          const pdf = row.length > 4 ? row[4] : null;
+
+          const cajaTxt =
+            cajaNum === 0 ? "<strong>0</strong> (Pendiente)" : cajaNum;
+          const irCajaUrl = buildCajaUrl(cajaId, doc);
+          const pdfLink = pdf
+            ? `<a class="btn-small" href="${buildPdfUrl(doc)}" target="_blank" rel="noopener">Ver PDF</a>`
+            : `<button type="button" class="btn-small btn-disabled"
+                 onclick="alert('Este documento no tiene PDF.');">
+                 Ver PDF
+               </button>`;
+
+          return `
+            <tr>
+              <td>${cajaTxt}</td>
+              <td>${formatMiles(doc)}</td>
+              <td>${String(nombre || "").toUpperCase()}</td>
+              <td>${pdf ? "Si" : "No"}</td>
+              <td>
+                <div class="acciones-cell">
+                  <button type="button" class="btn-small"
+                          onclick="abrirModalEditarDesdeBusqueda(${doc}, ${JSON.stringify(nombre || "")}, ${cajaNum}, ${cajaId})">
+                    Modificar
+                  </button>
+
+                  <form method="post" style="margin:0;">
+                    <input type="hidden" name="accion" value="eliminar_archivo_modal">
+                    <input type="hidden" name="numero" value="${doc}">
+                    <button type="submit" class="btn-small btn-danger"
+                            onclick="return confirm('Seguro que deseas eliminar el documento ' + ${doc} + '?');">
+                      Eliminar
+                    </button>
+                  </form>
+
+                  ${pdfLink}
+
+                  <a class="btn-small" href="${irCajaUrl}"
+                     style="text-decoration:none; color:#000;">
+                    Ir a
+                  </a>
+                </div>
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      cont.innerHTML = `
+        <table>
+          <tr>
+            <th>Caja</th>
+            <th>Documento</th>
+            <th>Nombre</th>
+            <th>PDF</th>
+            <th>Accion</th>
+          </tr>
+          ${body}
+        </table>
+      `;
+    } else {
     // resultado = [caja_id, caja_num, documento, nombre, pdf_path]
     BUSQ.cajaId = resultado[0];
     BUSQ.cajaNum = resultado[1];
@@ -160,12 +233,12 @@ if (resultado) {
         <tr>
           <td>${cajaTxt}</td>
           <td>${formatMiles(BUSQ.doc)}</td>
-          <td>${BUSQ.nombre}</td>
+          <td>${String(BUSQ.nombre || "").toUpperCase()}</td>
           <td>${BUSQ.pdf ? "Sí" : "No"}</td>
           <td>
             <div class="acciones-cell">
               <button type="button" class="btn-small"
-                      onclick="abrirModalEditarDesdeBusqueda()">
+                      onclick="abrirModalEditarDesdeBusqueda(BUSQ.doc, BUSQ.nombre, BUSQ.cajaNum, BUSQ.cajaId)">
                 ✏️ Modificar
               </button>
 
@@ -189,6 +262,7 @@ if (resultado) {
         </tr>
       </table>
     `;
+    }
   }
 
   abrirModal("Buscar");

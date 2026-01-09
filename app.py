@@ -71,6 +71,9 @@ def csrf_protect():
 
 app.jinja_env.globals["csrf_token"] = csrf_token
 
+def normalizar_nombre(nombre):
+    return nombre.upper() if nombre else nombre
+
 @app.template_filter("puntos")
 def formato_puntos(valor):
     try:
@@ -702,6 +705,7 @@ def archivos():
             nombre = request.form.get("nombre", "").strip()
             if not nombre:
                 nombre = f"Documento {numero}"
+            nombre = normalizar_nombre(nombre)
 
             agregar_archivo(numero, nombre, grupo_id, creado_por=session.get("usuario_id"))
 
@@ -733,6 +737,8 @@ def archivos():
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
             nombre_new = request.form.get("nombre_new", "").strip()
+            nombre_new = normalizar_nombre(nombre_new)
+            nombre_new = normalizar_nombre(nombre_new)
 
             conn = get_db()
             cur = conn.cursor()
@@ -1261,6 +1267,9 @@ def archivo():
         elif accion == "agregar_documento":
             numero = int(request.form["numero"])
             nombre = request.form.get("nombre", "").strip()
+            if not nombre:
+                nombre = f"Documento {numero}"
+            nombre = normalizar_nombre(nombre)
 
             conn = get_db()
             cur = conn.cursor()
@@ -1400,6 +1409,7 @@ def archivo():
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
             nombre_new = request.form.get("nombre_new", "").strip()
+            nombre_new = normalizar_nombre(nombre_new)
 
             # checkbox para eliminar PDF actual
             remove_pdf = request.form.get("remove_pdf") == "1"
@@ -1547,12 +1557,11 @@ def archivo():
                 JOIN cajas c ON c.id = a.caja_id
                 LEFT JOIN ranked r ON r.id = c.id
                 WHERE a.numero = %s AND a.grupo_id = %s
-                LIMIT 1
             """, (grupo_id, doc, grupo_id))
 
-            row = cur.fetchone()
-            if row:
-                resultado = row
+            rows = cur.fetchall()
+            if rows:
+                resultado = rows
             else:
                 resultado = ("no",)
 
@@ -1574,11 +1583,10 @@ def archivo():
                 LEFT JOIN ranked r ON r.id = c.id
                 WHERE a.nombre ILIKE %s AND a.grupo_id = %s
                 ORDER BY a.numero
-                LIMIT 1
             """, (grupo_id, f"%{buscar_raw}%", grupo_id))
-            row = cur.fetchone()
-            if row:
-                resultado = row
+            rows = cur.fetchall()
+            if rows:
+                resultado = rows
             else:
                 resultado = ("no",)
         finally:

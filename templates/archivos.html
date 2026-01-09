@@ -38,7 +38,7 @@
             {% endif %}
           </td>
           <td>{{ resultado[2]|puntos }}</td>
-          <td>{{ resultado[3] }}</td>
+          <td>{{ resultado[3]|upper }}</td>
           <td>{{ "SÃ­" if resultado[4] else "No" }}</td>
         </tr>
       </table>
@@ -75,7 +75,7 @@
         </td>
 
         <td>{{ m[2]|puntos }}</td>
-        <td>{{ m[3] }}</td>
+        <td>{{ m[3]|upper }}</td>
         <td>{{ m[4] }}</td>
 
         <td>
@@ -307,7 +307,7 @@ document.addEventListener("keydown", function(e){
             {% endif %}
         </td>
         <td>{{ a[1]|puntos }}</td>
-        <td>{{ a[2] }}</td>
+        <td>{{ a[2]|upper }}</td>
         <td>
             <button type="button"
                     data-numero="{{ a[1] }}"

@@ -1,44 +1,46 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 
 {% block title %}Inicio{% endblock %}
 
 {% block content %}
+<div class="inicio-center">
+    <div class="inicio-panel">
+        <h1>👋 ¡Bienvenido {{ session.get("usuario") }}!</h1>
 
-<h1>👋 ¡Bienvenido {{ session.get("usuario") }}!</h1>
+        <p>
+            Has iniciado sesion correctamente en el sistema de gestion documental.
+        </p>
 
-<p>
-    Has iniciado sesion correctamente en el sistema de gestion documental.
-</p>
+        <div style="margin-top: 20px;">
+            <p>Desde aqui puedes:</p>
+            <ul>
+                <li>📁 Administrar archivos</li>
+                <li>📦 Gestionar cajas por rangos</li>
+                <li>🔍 Mantener el control y organizacion de la informacion</li>
+            </ul>
+        </div>
 
-<div style="margin-top: 20px;">
-    <p>Desde aqui puedes:</p>
-    <ul>
-        <li>📁 Administrar archivos</li>
-        <li>📦 Gestionar cajas por rangos</li>
-        <li>🔍 Mantener el control y organizacion de la informacion</li>
-    </ul>
-</div>
+        <div style="display:flex; gap:12px; margin-top:20px; flex-wrap:wrap;">
+            <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
+                <strong>Documentos</strong>
+                <div style="font-size:24px; margin-top:6px;">{{ total_archivos }}</div>
+            </div>
+            <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
+                <strong>Cajas</strong>
+                <div style="font-size:24px; margin-top:6px;">{{ total_cajas }}</div>
+            </div>
+            <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:220px; background:#fff;">
+                <strong>Empresa activa</strong>
+                <div style="font-size:16px; margin-top:6px;">{{ grupo_actual or "Sin grupo" }}</div>
+            </div>
+        </div>
 
-<div style="display:flex; gap:12px; margin-top:20px; flex-wrap:wrap;">
-    <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
-        <strong>Documentos</strong>
-        <div style="font-size:24px; margin-top:6px;">{{ total_archivos }}</div>
+        <div style="margin-top: 20px; display:flex; gap:10px; flex-wrap:wrap;">
+            <a class="btn" href="{{ url_for('archivo') }}">📂 Ir a Archivo</a>
+            {% if session.get("rol") in ["admin", "supervisor"] %}
+              <a class="btn" href="{{ url_for('grupos') }}">👥 Ir a Empresa</a>
+            {% endif %}
+        </div>
     </div>
-    <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
-        <strong>Cajas</strong>
-        <div style="font-size:24px; margin-top:6px;">{{ total_cajas }}</div>
-    </div>
-    <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:220px; background:#fff;">
-        <strong>Empresa activa</strong>
-        <div style="font-size:16px; margin-top:6px;">{{ grupo_actual or "Sin grupo" }}</div>
-    </div>
 </div>
-
-<div style="margin-top: 20px; display:flex; gap:10px; flex-wrap:wrap;">
-    <a class="btn" href="{{ url_for('archivo') }}">📂 Ir a Archivo</a>
-    {% if session.get("rol") in ["admin", "supervisor"] %}
-      <a class="btn" href="{{ url_for('grupos') }}">👥 Ir a Empresa</a>
-    {% endif %}
-</div>
-
 {% endblock %}

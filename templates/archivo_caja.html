@@ -80,7 +80,7 @@
   {% for a in archivos %}
   <tr{% if highlight_num is not none and a[0] == highlight_num %} class="row-highlight"{% endif %}>
     <td>{{ a[0]|puntos }}</td>
-    <td>{{ a[1] }}</td>
+    <td>{{ a[1]|upper }}</td>
     <td>{{ "Si" if a|length > 2 and a[2] else "No" }}</td>
     <td>
       <button class="btn" type="button"

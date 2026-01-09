@@ -20,6 +20,17 @@ body {
     background-attachment: fixed;
 }
 
+.inicio-center {
+    min-height: 60vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.inicio-panel {
+    width: min(900px, 100%);
+}
+
 nav a {
     margin-right: 10px;
     text-decoration: none;

@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 archivo.db
 .env
+uploads/
+*.db

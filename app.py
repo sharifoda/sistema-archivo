@@ -1928,71 +1928,88 @@ def admin_logs():
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT COALESCE(u.usuario, '[eliminado]') AS usuario,
-               l.accion, l.fecha, l.ip, g.nombre, l.grupo_id
-        FROM logs l
-        LEFT JOIN usuarios u ON u.id = l.usuario_id
-        LEFT JOIN grupos g ON g.id = l.grupo_id
-        ORDER BY l.fecha DESC
-        LIMIT 200
-    """)
-
-    registros = cur.fetchall()
-
+    registros = []
+    movimientos = []
+    usuarios = []
+    grupos_todos = []
     logs_por_grupo = defaultdict(list)
-    for r in registros:
-        grupo_nombre = r[4] or "Sin empresa"
-        logs_por_grupo[grupo_nombre].append(r)
-
-    cur.execute("""
-        SELECT
-            m.id,
-            m.fecha,
-            COALESCE(u.usuario, '[eliminado]') AS usuario,
-            g.nombre,
-            m.entidad,
-            m.accion,
-            m.datos_antes,
-            m.datos_despues,
-            m.grupo_id,
-            m.entidad_id
-        FROM movimientos m
-        LEFT JOIN usuarios u ON u.id = m.usuario_id
-        LEFT JOIN grupos g ON g.id = m.grupo_id
-        ORDER BY m.fecha DESC
-        LIMIT 200
-    """)
-    movimientos = cur.fetchall()
-
     movimientos_por_grupo = defaultdict(list)
-    for m in movimientos:
-        grupo_nombre = m[3] or "Sin empresa"
-        movimientos_por_grupo[grupo_nombre].append(m)
 
-    cur.execute("""
-        SELECT
-            u.id,
-            u.usuario,
-            u.rol,
-            u.creado_en,
-            COALESCE(string_agg(g.nombre, ', ' ORDER BY g.nombre), 'Sin grupo') AS grupos,
-            COALESCE(array_agg(g.id ORDER BY g.id), ARRAY[]::integer[]) AS grupo_ids
-        FROM usuarios u
-        LEFT JOIN usuarios_grupos ug ON ug.usuario_id = u.id
-        LEFT JOIN grupos g ON g.id = ug.grupo_id AND g.archivado = FALSE
-        GROUP BY u.id, u.usuario, u.rol, u.creado_en
-        ORDER BY u.creado_en DESC
-    """)
-    usuarios = cur.fetchall()
+    try:
+        cur.execute("""
+            SELECT COALESCE(u.usuario, '[eliminado]') AS usuario,
+                   l.accion, l.fecha, l.ip, g.nombre, l.grupo_id
+            FROM logs l
+            LEFT JOIN usuarios u ON u.id = l.usuario_id
+            LEFT JOIN grupos g ON g.id = l.grupo_id
+            ORDER BY l.fecha DESC
+            LIMIT 200
+        """)
+        registros = cur.fetchall()
+        for r in registros:
+            grupo_nombre = r[4] or "Sin empresa"
+            logs_por_grupo[grupo_nombre].append(r)
+    except Exception:
+        conn.rollback()
+        app.logger.exception("Error cargando auditoria")
+        flash("No se pudo cargar Auditoria.", "error")
 
-    cur.execute("""
-        SELECT id, nombre
-        FROM grupos
-        WHERE archivado = FALSE
-        ORDER BY nombre
-    """)
-    grupos_todos = cur.fetchall()
+    try:
+        cur.execute("""
+            SELECT
+                m.id,
+                m.fecha,
+                COALESCE(u.usuario, '[eliminado]') AS usuario,
+                g.nombre,
+                m.entidad,
+                m.accion,
+                m.datos_antes,
+                m.datos_despues,
+                m.grupo_id,
+                m.entidad_id
+            FROM movimientos m
+            LEFT JOIN usuarios u ON u.id = m.usuario_id
+            LEFT JOIN grupos g ON g.id = m.grupo_id
+            ORDER BY m.fecha DESC
+            LIMIT 200
+        """)
+        movimientos = cur.fetchall()
+        for m in movimientos:
+            grupo_nombre = m[3] or "Sin empresa"
+            movimientos_por_grupo[grupo_nombre].append(m)
+    except Exception:
+        conn.rollback()
+        app.logger.exception("Error cargando movimientos")
+        flash("No se pudo cargar Movimientos.", "error")
+
+    try:
+        cur.execute("""
+            SELECT
+                u.id,
+                u.usuario,
+                u.rol,
+                u.creado_en,
+                COALESCE(string_agg(g.nombre, ', ' ORDER BY g.nombre), 'Sin grupo') AS grupos,
+                COALESCE(array_agg(g.id ORDER BY g.id), ARRAY[]::integer[]) AS grupo_ids
+            FROM usuarios u
+            LEFT JOIN usuarios_grupos ug ON ug.usuario_id = u.id
+            LEFT JOIN grupos g ON g.id = ug.grupo_id AND g.archivado = FALSE
+            GROUP BY u.id, u.usuario, u.rol, u.creado_en
+            ORDER BY u.creado_en DESC
+        """)
+        usuarios = cur.fetchall()
+
+        cur.execute("""
+            SELECT id, nombre
+            FROM grupos
+            WHERE archivado = FALSE
+            ORDER BY nombre
+        """)
+        grupos_todos = cur.fetchall()
+    except Exception:
+        conn.rollback()
+        app.logger.exception("Error cargando usuarios/grupos")
+        flash("No se pudo cargar Usuarios.", "error")
 
     cur.close()
     conn.close()

@@ -249,7 +249,8 @@
      data-json='{{ {
        "urlCajaBase": url_for("archivo_caja", caja_id=0),
        "urlPdfBase":  url_for("ver_pdf", numero=0),
-       "resultado":   resultado
+       "resultado":   resultado,
+       "csrfToken":   csrf_token()
      } | tojson }}'>
 </div>
 

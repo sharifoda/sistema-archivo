@@ -7,6 +7,7 @@ const data = JSON.parse(el.dataset.json);
 const URL_CAJA_BASE = data.urlCajaBase;
 const URL_PDF_BASE  = data.urlPdfBase;
 const resultado     = data.resultado;
+const csrfToken     = data.csrfToken || "";
 
 /* =========================
    Estado global de búsqueda
@@ -65,6 +66,15 @@ function formatMiles(value) {
   return num.toLocaleString("es-CO");
 }
 
+function escapeAttr(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 /* =========================
    Modal editar desde búsqueda
    ========================= */
@@ -114,6 +124,18 @@ document.addEventListener("keydown", function (e) {
   cerrarModal("Editar");
 });
 
+document.addEventListener("click", function (e) {
+  const btn = e.target.closest(".btn-modificar-busq");
+  if (!btn) return;
+
+  const doc = Number(btn.dataset.doc);
+  const nombre = btn.dataset.nombre || "";
+  const cajaNum = Number(btn.dataset.cajaNum);
+  const cajaId = Number(btn.dataset.cajaId);
+
+  abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId);
+});
+
 /* =========================
    Procesar resultado búsqueda
    ========================= */
@@ -141,6 +163,7 @@ if (resultado) {
           const doc = row[2];
           const nombre = row[3];
           const pdf = row.length > 4 ? row[4] : null;
+          const nombreAttr = escapeAttr(nombre || "");
 
           const cajaTxt =
             cajaNum === 0 ? "<strong>0</strong> (Pendiente)" : cajaNum;
@@ -160,12 +183,16 @@ if (resultado) {
               <td>${pdf ? "Si" : "No"}</td>
               <td>
                 <div class="acciones-cell">
-                  <button type="button" class="btn-small"
-                          onclick="abrirModalEditarDesdeBusqueda(${doc}, ${JSON.stringify(nombre || "")}, ${cajaNum}, ${cajaId})">
+                  <button type="button" class="btn-small btn-modificar-busq"
+                          data-doc="${doc}"
+                          data-nombre="${nombreAttr}"
+                          data-caja-num="${cajaNum}"
+                          data-caja-id="${cajaId}">
                     Modificar
                   </button>
 
                   <form method="post" style="margin:0;">
+                    <input type="hidden" name="_csrf_token" value="${csrfToken}">
                     <input type="hidden" name="accion" value="eliminar_archivo_modal">
                     <input type="hidden" name="numero" value="${doc}">
                     <button type="submit" class="btn-small btn-danger"
@@ -262,6 +289,23 @@ if (resultado) {
         </tr>
       </table>
     `;
+    const btnMod = cont.querySelector(".acciones-cell > button");
+    if (btnMod) {
+      btnMod.classList.add("btn-modificar-busq");
+      btnMod.removeAttribute("onclick");
+      btnMod.dataset.doc = BUSQ.doc;
+      btnMod.dataset.nombre = BUSQ.nombre || "";
+      btnMod.dataset.cajaNum = BUSQ.cajaNum;
+      btnMod.dataset.cajaId = BUSQ.cajaId;
+    }
+    const formDel = cont.querySelector(".acciones-cell form");
+    if (formDel && csrfToken) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "_csrf_token";
+      input.value = csrfToken;
+      formDel.insertBefore(input, formDel.firstChild);
+    }
     }
   }
 

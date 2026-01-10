@@ -190,7 +190,10 @@
   // ----- Modal Caja -----
   function abrirModalCaja(id, rmin, rmax){
     document.getElementById("caja_id_modal").value = id;
-    document.getElementById("caja_id_modal_del").value = id;
+    const delInput = document.getElementById("caja_id_modal_del");
+    if (delInput) {
+      delInput.value = id;
+    }
     document.getElementById("rango_min_modal").value = rmin;
     document.getElementById("rango_max_modal").value = rmax;
 

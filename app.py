@@ -457,15 +457,38 @@ def grupos():
     grupos_info = []
     conn = get_db()
     cur = conn.cursor()
-    for g in grupos_data:
+    log_cols = set()
+    try:
         cur.execute(
             """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'logs'
+            """
+        )
+        log_cols = {r[0] for r in cur.fetchall()}
+    except Exception:
+        conn.rollback()
+        log_cols = set()
+
+    if "fecha" in log_cols:
+        fecha_expr = "MAX(l.fecha)"
+    elif "creado_en" in log_cols:
+        fecha_expr = "MAX(l.creado_en)"
+    elif "created_at" in log_cols:
+        fecha_expr = "MAX(l.created_at)"
+    else:
+        fecha_expr = "NULL"
+
+    for g in grupos_data:
+        cur.execute(
+            f"""
             SELECT
                 u.id,
                 u.usuario,
                 ug.puede_eliminar,
                 ug.puede_editar,
-                MAX(l.fecha) AS ultima_conexion
+                {fecha_expr} AS ultima_conexion
             FROM usuarios_grupos ug
             JOIN usuarios u ON u.id = ug.usuario_id
             LEFT JOIN logs l ON l.usuario_id = u.id AND l.accion = 'LOGIN'

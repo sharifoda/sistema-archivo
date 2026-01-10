@@ -135,12 +135,14 @@
 
   </form>
 
-  <form method="post" onsubmit="return confirm('¿Seguro que deseas eliminar esta caja?');" style="margin:12px 0;">
+  {% if session.get("rol") in ["admin", "supervisor"] %}
+  <form method="post" onsubmit="return confirm('?Seguro que deseas eliminar esta caja?');" style="margin:12px 0;">
     <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
     <input type="hidden" name="accion" value="eliminar_caja">
     <input type="hidden" name="caja_id" id="caja_id_modal_del">
     <button class="btn btn-danger btn-wide" type="submit">Eliminar caja</button>
   </form>
+{% endif %}
 
   <div class="actions">
     <button class="btn" type="button" onclick="cerrarModalCaja()">Cancelar</button>

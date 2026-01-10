@@ -117,6 +117,14 @@ def supervisor_requerido():
     return session.get("rol") in ("admin", "supervisor")
 
 
+def puede_crear_modificar_cajas():
+    return session.get("rol") in ("admin", "supervisor", "usuario")
+
+
+def puede_eliminar_cajas():
+    return session.get("rol") in ("admin", "supervisor")
+
+
 def usuario_requerido():
     return session.get("rol") not in ("admin", "supervisor")
 
@@ -522,12 +530,8 @@ def cajas():
         if accion == "eliminar":
             caja_id = int(request.form["caja_id"])
 
-            if not admin_requerido():
-                flash("Solo el admin puede eliminar cajas.", "error")
-                return redirect(url_for("cajas"))
-
-            if not admin_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
-                flash("No tienes permiso para eliminar cajas en este grupo.", "error")
+            if not puede_eliminar_cajas():
+                flash("Solo el supervisor o admin puede eliminar cajas.", "error")
                 return redirect(url_for("cajas"))
 
             eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
@@ -550,8 +554,8 @@ def cajas():
             nuevo_min = int(request.form["rango_min"])
             nuevo_max = int(request.form["rango_max"])
 
-            if not admin_requerido():
-                flash("Solo el admin puede modificar cajas.", "error")
+            if not puede_crear_modificar_cajas():
+                flash("No tienes permiso para modificar cajas.", "error")
                 return redirect(url_for("cajas"))
 
             modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
@@ -592,8 +596,8 @@ def cajas():
             rmin = int(request.form["rango_min"])
             rmax = int(request.form["rango_max"])
 
-            if not admin_requerido():
-                flash("Solo el admin puede crear cajas.", "error")
+            if not puede_crear_modificar_cajas():
+                flash("No tienes permiso para crear cajas.", "error")
                 return redirect(url_for("cajas"))
 
             nueva_caja_id = crear_caja(
@@ -1660,8 +1664,8 @@ def archivo_caja(caja_id):
             nuevo_min = int(request.form["rango_min"])
             nuevo_max = int(request.form["rango_max"])
 
-            if not admin_requerido():
-                flash("Solo el admin puede modificar cajas.", "error")
+            if not puede_crear_modificar_cajas():
+                flash("No tienes permiso para modificar cajas.", "error")
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
@@ -1691,12 +1695,8 @@ def archivo_caja(caja_id):
 
         # ---------- ELIMINAR CAJA ----------
         if accion == "eliminar_caja":
-            if not admin_requerido():
-                flash("Solo el admin puede eliminar cajas.", "error")
-                return redirect(url_for("archivo_caja", caja_id=caja_id))
-
-            if not admin_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
-                flash("No tienes permiso para eliminar cajas en este grupo.", "error")
+            if not puede_eliminar_cajas():
+                flash("Solo el supervisor o admin puede eliminar cajas.", "error")
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))

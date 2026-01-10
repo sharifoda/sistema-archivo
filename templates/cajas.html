@@ -3,6 +3,7 @@
 
 <h2>ðŸ“¦ Cajas</h2>
 
+{% if session.get("rol") in ["admin", "supervisor", "usuario"] %}
 <h3>➕ Crear caja</h3>
 <form method="post">
     <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
@@ -16,6 +17,7 @@
 
     <button type="submit">Crear caja</button>
 </form>
+{% endif %}
 
 <hr>
 
@@ -161,6 +163,7 @@
     </td>
     <td>
       {% if c[4] != 0 %}
+        {% if session.get("rol") in ["admin", "supervisor", "usuario"] %}
         <button type="button"
                 data-id="{{ c[0] }}"
                 data-visible="{{ c[4] }}"
@@ -169,17 +172,20 @@
                 onclick="abrirModalCaja(this)">
           Modificar
         </button>
+        {% endif %}
 
+        {% if session.get("rol") in ["admin", "supervisor"] %}
         <form method="post" style="display:inline;">
     <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
           <input type="hidden" name="accion" value="eliminar">
           <input type="hidden" name="caja_id" value="{{ c[0] }}">
           <button type="submit"
-                  onclick="return confirm('¿Seguro que deseas eliminar esta caja?');">
+                  onclick="return confirm('?eguro que deseas eliminar esta caja?');">
             Eliminar
           </button>
         </form>
-      {% else %}
+        {% endif %}
+{% else %}
         <em>-</em>
       {% endif %}
     </td>

@@ -571,7 +571,7 @@ def cajas():
 
             if total_movidos > 0:
                 flash(
-                    f"Se reasignaron automÃ¡ticamente {total_movidos} archivo(s) segÃºn el nuevo rango.",
+                    f"Se reasignaron automaticamente {total_movidos} archivo(s) segun el nuevo rango.",
                     "success"
                 )
             else:
@@ -1246,8 +1246,8 @@ def archivo():
             rmin = int(request.form["rango_min"])
             rmax = int(request.form["rango_max"])
 
-            if not admin_requerido():
-                flash("Solo el admin puede crear cajas.", "error")
+            if not puede_crear_modificar_cajas():
+                flash("No tienes permiso para crear cajas.", "error")
                 return redirect(url_for("archivo"))
 
             nueva_caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=session.get("usuario_id"))
@@ -1687,7 +1687,7 @@ def archivo_caja(caja_id):
             )
 
             if total > 0:
-                flash(f"Se reasignaron automÃ¡ticamente {total} archivo(s) segÃºn el nuevo rango.", "success")
+                flash(f"Se reasignaron automaticamente {total} archivo(s) segun el nuevo rango.", "success")
             else:
                 flash("El rango se actualizÃ³. No fue necesario reasignar archivos.", "info")
 

@@ -608,7 +608,7 @@ def cajas():
                 )
             else:
                 flash(
-                    "El rango se actualizÃ³. No fue necesario reasignar archivos.",
+                    "El rango se actualizo. No fue necesario reasignar archivos.",
                     "info"
                 )
 
@@ -1721,7 +1721,7 @@ def archivo_caja(caja_id):
             if total > 0:
                 flash(f"Se reasignaron automaticamente {total} archivo(s) segun el nuevo rango.", "success")
             else:
-                flash("El rango se actualizÃ³. No fue necesario reasignar archivos.", "info")
+                flash("El rango se actualizo. No fue necesario reasignar archivos.", "info")
 
             return redirect(url_for("archivo_caja", caja_id=caja_id))
 

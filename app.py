@@ -372,11 +372,19 @@ def grupos():
                         )
 
                     cur.execute(
-                        "SELECT grupo_id FROM usuarios_grupos WHERE usuario_id = %s LIMIT 1",
+                        """
+                        SELECT g.id, g.nombre
+                        FROM usuarios_grupos ug
+                        JOIN grupos g ON g.id = ug.grupo_id
+                        WHERE ug.usuario_id = %s
+                        ORDER BY g.id
+                        LIMIT 1
+                        """,
                         (usuario_id,)
                     )
                     current = cur.fetchone()
                     current_group_id = current[0] if current else None
+                    current_group_name = current[1] if current else None
 
                     if nuevo_grupo_id == 0:
                         cur.execute(
@@ -394,7 +402,8 @@ def grupos():
                             puede_eliminar=(nuevo_rol in ("admin", "supervisor")),
                             puede_editar=True
                         )
-                        eliminar_grupo_personal(usuario_id, nuevo_grupo_id)
+                        if current_group_name and current_group_name.startswith("Personal - "):
+                            eliminar_grupo_personal(usuario_id, nuevo_grupo_id)
 
                     conn.commit()
                     flash("Usuario actualizado correctamente.", "success")

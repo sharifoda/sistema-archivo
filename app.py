@@ -30,12 +30,15 @@ from grupos import (
 from logs import registrar_log
 from historial import registrar_movimiento
 from werkzeug.security import generate_password_hash
+from psycopg2.extras import execute_values, Json
 from db import get_db
 from io import BytesIO
 from datetime import datetime
 from collections import defaultdict
 from openpyxl.styles import Font
 from flask import flash
+import threading
+import uuid
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -139,6 +142,104 @@ def es_archivador_grupo(grupo_id):
     cur.close()
     conn.close()
     return row and row[0] == "Archivador"
+
+
+def importar_excel_job(file_path, grupo_id, usuario_id):
+    """
+    Procesa la importacion de Excel en segundo plano con inserciones por lotes.
+    """
+    try:
+        wb = load_workbook(file_path, data_only=True)
+    except Exception:
+        app.logger.exception("Archivo Excel invalido")
+        return
+
+    ws = wb.active
+    max_row = ws.max_row or 1
+    max_col = ws.max_column or 1
+
+    columnas = []
+    for col in range(1, max_col + 1):
+        header = ws.cell(row=1, column=col).value
+        if header is None or str(header).strip() == "":
+            continue
+        numeros = []
+        for row in range(2, max_row + 1):
+            cell_val = ws.cell(row=row, column=col).value
+            if cell_val is None:
+                continue
+            if isinstance(cell_val, (int, float)):
+                try:
+                    num = int(cell_val)
+                except Exception:
+                    continue
+            else:
+                s = str(cell_val).strip()
+                if not s.isdigit():
+                    continue
+                num = int(s)
+            numeros.append(num)
+        columnas.append((col, str(header).strip(), numeros))
+
+    if not columnas:
+        app.logger.warning("Importacion Excel: sin cajas")
+        return
+
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        for _, _, nums in columnas:
+            nums = sorted(set(nums))
+            if not nums:
+                continue
+            rmin = min(nums)
+            rmax = max(nums)
+            caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=usuario_id)
+
+            values = [(n, f"Documento {n}", caja_id, usuario_id, grupo_id) for n in nums]
+            sql = """
+                INSERT INTO archivos (numero, nombre, caja_id, creado_por, grupo_id)
+                VALUES %s
+                ON CONFLICT (grupo_id, numero) DO NOTHING
+                RETURNING id, numero, nombre, caja_id
+            """
+            execute_values(cur, sql, values, page_size=1000)
+            rows = cur.fetchall()
+
+            if rows:
+                mov_values = [
+                    (
+                        usuario_id,
+                        grupo_id,
+                        "archivo",
+                        r[0],
+                        "CREAR_ARCHIVO",
+                        None,
+                        Json({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3]}),
+                        None,
+                    )
+                    for r in rows
+                ]
+                mov_sql = """
+                    INSERT INTO movimientos (
+                        usuario_id, grupo_id, entidad, entidad_id, accion,
+                        datos_antes, datos_despues, meta
+                    )
+                    VALUES %s
+                """
+                execute_values(cur, mov_sql, mov_values, page_size=1000)
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        app.logger.exception("Error importando Excel")
+    finally:
+        cur.close()
+        conn.close()
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
 
 
 # ---------------- LOGIN ----------------
@@ -1158,119 +1259,26 @@ def archivo():
     if request.method == "POST":
         # ---------- Importar Excel ----------
         if accion == "importar_excel":
-            if not admin_requerido():
-                flash("Solo el admin puede importar Excel.", "error")
-                return redirect(url_for("archivo"))
-
             excel_file = request.files.get("excel")
             if not excel_file or not excel_file.filename:
                 flash("Debes seleccionar un archivo Excel.", "error")
                 return redirect(url_for("archivo"))
 
-            try:
-                wb = load_workbook(excel_file, data_only=True)
-            except Exception as e:
-                flash(f"Archivo Excel invalido: {e}", "error")
-                return redirect(url_for("archivo"))
+            uploads_dir = os.path.join(app.root_path, "uploads", "imports")
+            os.makedirs(uploads_dir, exist_ok=True)
+            ext = os.path.splitext(excel_file.filename)[1].lower()
+            filename = f"import_{uuid.uuid4().hex}{ext or '.xlsx'}"
+            file_path = os.path.join(uploads_dir, filename)
+            excel_file.save(file_path)
 
-            ws = wb.active
-            max_row = ws.max_row or 1
-            max_col = ws.max_column or 1
+            t = threading.Thread(
+                target=importar_excel_job,
+                args=(file_path, grupo_id, session.get("usuario_id")),
+                daemon=True
+            )
+            t.start()
 
-            columnas = []
-            for col in range(1, max_col + 1):
-                header = ws.cell(row=1, column=col).value
-                if header is None or str(header).strip() == "":
-                    continue
-                numeros = []
-                for row in range(2, max_row + 1):
-                    cell_val = ws.cell(row=row, column=col).value
-                    if cell_val is None:
-                        continue
-                    if isinstance(cell_val, (int, float)):
-                        try:
-                            num = int(cell_val)
-                        except Exception:
-                            continue
-                    else:
-                        s = str(cell_val).strip()
-                        if not s.isdigit():
-                            continue
-                        num = int(s)
-                    numeros.append(num)
-                columnas.append((col, str(header).strip(), numeros))
-
-            if not columnas:
-                flash("No se encontraron cajas en la primera fila del Excel.", "error")
-                return redirect(url_for("archivo"))
-
-            total_cajas = 0
-            total_docs = 0
-            insertados = 0
-            duplicados = 0
-            vacias = 0
-
-            conn = get_db()
-            cur = conn.cursor()
-            try:
-                for _, _, nums in columnas:
-                    nums = sorted(set(nums))
-                    if not nums:
-                        vacias += 1
-                        continue
-                    rmin = min(nums)
-                    rmax = max(nums)
-                    caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=session.get("usuario_id"))
-                    total_cajas += 1
-                    total_docs += len(nums)
-
-                    for numero in nums:
-                        nombre = f"Documento {numero}"
-                        cur.execute(
-                            """
-                            INSERT INTO archivos (numero, nombre, caja_id, creado_por, grupo_id)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT (grupo_id, numero) DO NOTHING
-                            RETURNING id
-                            """,
-                            (numero, nombre, caja_id, session.get("usuario_id"), grupo_id)
-                        )
-                        row = cur.fetchone()
-                        if row:
-                            insertados += 1
-                            registrar_movimiento(
-                                session.get("usuario_id"),
-                                grupo_id,
-                                entidad="archivo",
-                                entidad_id=row[0],
-                                accion="CREAR_ARCHIVO",
-                                datos_despues={
-                                    "id": row[0],
-                                    "numero": numero,
-                                    "nombre": nombre,
-                                    "caja_id": caja_id
-                                },
-                            )
-                        else:
-                            duplicados += 1
-
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                cur.close()
-                conn.close()
-                flash(f"Error al importar Excel: {e}", "error")
-                return redirect(url_for("archivo"))
-
-            cur.close()
-            conn.close()
-
-            msg = f"Importacion lista. Cajas: {total_cajas}, Documentos: {insertados}"
-            if duplicados:
-                msg += f", Duplicados: {duplicados}"
-            if vacias:
-                msg += f", Cajas vacias: {vacias}"
-            flash(msg + ".", "success")
+            flash("Importacion iniciada. Puedes seguir usando el sistema.", "info")
             return redirect(url_for("archivo"))
 
         # ---------- Crear Caja ----------

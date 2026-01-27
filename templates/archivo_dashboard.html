@@ -125,9 +125,7 @@
 <!-- Excel -->
 <div class="excel-fab">
   <a class="btn" href="{{ url_for('export_excel') }}">Descargar Excel</a>
-  {% if session.get("rol") == "admin" %}
   <button class="btn" type="button" onclick="abrirModal('ImportExcel')">Importar Excel</button>
-  {% endif %}
 </div>
 
 <!-- ===== MODAL IMPORTAR EXCEL ===== -->

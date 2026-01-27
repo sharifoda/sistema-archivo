@@ -530,6 +530,10 @@ def grupos():
                     # Desvincular logs/movimientos para evitar FK al eliminar usuario
                     cur.execute("UPDATE logs SET usuario_id = NULL WHERE usuario_id = %s", (usuario_id,))
                     cur.execute("UPDATE movimientos SET usuario_id = NULL WHERE usuario_id = %s", (usuario_id,))
+                    # Desvincular creador en grupos/cajas/archivos
+                    cur.execute("UPDATE grupos SET creado_por = NULL WHERE creado_por = %s", (usuario_id,))
+                    cur.execute("UPDATE cajas SET creado_por = NULL WHERE creado_por = %s", (usuario_id,))
+                    cur.execute("UPDATE archivos SET creado_por = NULL WHERE creado_por = %s", (usuario_id,))
                     cur.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
                     conn.commit()
                 except Exception as e:

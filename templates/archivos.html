@@ -21,7 +21,7 @@
   <div style="margin-top:15px;">
     {% if resultado[0] == "error" %}
       <p style="color:#b00020;">⚠️ Debes ingresar un numero valido. Escribiste: <strong>{{ resultado[1] }}</strong></p>
-    {% elif resultado is none %}
+    {% elif resultado[0] == "no" %}
       <p style="color:#b00020;">❌ No se encontro ningun archivo con ese documento.</p>
     {% else %}
       <h4>✅ Resultado</h4>
@@ -29,18 +29,20 @@
         <tr>
           <th>Caja</th><th>Documento</th><th>Nombre</th><th>PDF</th>
         </tr>
+        {% for r in resultado %}
         <tr>
           <td>
-            {% if resultado[1] == 0 %}
+            {% if r[1] == 0 %}
               <strong>0</strong> (Pendiente)
             {% else %}
-              {{ resultado[1] }}
+              {{ r[1] }}
             {% endif %}
           </td>
-          <td>{{ resultado[2]|puntos }}</td>
-          <td>{{ resultado[3]|upper }}</td>
-          <td>{{ "SÃ­" if resultado[4] else "No" }}</td>
+          <td>{{ r[2]|puntos }}</td>
+          <td>{{ r[3]|upper }}</td>
+          <td>{{ "Si" if r[4] else "No" }}</td>
         </tr>
+        {% endfor %}
       </table>
     {% endif %}
   </div>

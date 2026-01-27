@@ -78,7 +78,7 @@
   </tr>
 
   {% for a in archivos %}
-  <tr{% if highlight_num is not none and a[0] == highlight_num %} class="row-highlight"{% endif %}>
+  <tr id="doc-{{ a[0] }}"{% if highlight_num is not none and a[0] == highlight_num %} class="row-highlight"{% endif %}>
     <td>{{ a[0]|puntos }}</td>
     <td>{{ a[1]|upper }}</td>
     <td>{{ "Si" if a|length > 2 and a[2] else "No" }}</td>
@@ -113,6 +113,17 @@
 </table>
 {% else %}
 <p style="color:#666;">No hay archivos en esta caja.</p>
+{% endif %}
+
+{% if highlight_num is not none %}
+<script>
+  window.addEventListener("load", function () {
+    const row = document.getElementById("doc-{{ highlight_num }}");
+    if (row) {
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+</script>
 {% endif %}
 
 <!-- ==========================

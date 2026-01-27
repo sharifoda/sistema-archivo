@@ -527,6 +527,9 @@ def grupos():
                 conn = get_db()
                 cur = conn.cursor()
                 try:
+                    # Desvincular logs/movimientos para evitar FK al eliminar usuario
+                    cur.execute("UPDATE logs SET usuario_id = NULL WHERE usuario_id = %s", (usuario_id,))
+                    cur.execute("UPDATE movimientos SET usuario_id = NULL WHERE usuario_id = %s", (usuario_id,))
                     cur.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
                     conn.commit()
                 except Exception as e:
@@ -1014,29 +1017,62 @@ def archivos():
     resultado = None
     buscar = request.args.get("buscar", "").strip()
     if buscar:
-        try:
-            doc = int(buscar)
-            cur.execute("""
-                WITH ranked AS (
-                SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
-                FROM cajas
-                WHERE grupo_id = %s AND is_pendiente = FALSE
-                )
-                SELECT
-                c.id AS caja_id,
-                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                a.numero AS documento,
-                a.nombre AS nombre,
-                a.pdf_path
-                FROM archivos a
-                JOIN cajas c ON c.id = a.caja_id
-                LEFT JOIN ranked r ON r.id = c.id
-                WHERE a.numero = %s AND a.grupo_id = %s
-                LIMIT 1;
-            """, (grupo_id, doc, grupo_id))
+        buscar_clean = buscar.replace(".", "")
+        if buscar_clean.isdigit():
+            doc = int(buscar_clean)
+            if "." in buscar:
+                cur.execute("""
+                    WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                    FROM cajas
+                    WHERE grupo_id = %s AND is_pendiente = FALSE
+                    )
+                    SELECT
+                    c.id AS caja_id,
+                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                    a.numero AS documento,
+                    a.nombre AS nombre,
+                    a.pdf_path
+                    FROM archivos a
+                    JOIN cajas c ON c.id = a.caja_id
+                    LEFT JOIN ranked r ON r.id = c.id
+                    WHERE a.grupo_id = %s
+                      AND (
+                        replace(to_char(a.numero, 'FM999G999G999G999G999'), ',', '.') = %s
+                        OR a.nombre ILIKE %s
+                      )
+                    ORDER BY a.numero
+                """, (grupo_id, grupo_id, buscar, buscar))
+            else:
+                cur.execute("""
+                    WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                    FROM cajas
+                    WHERE grupo_id = %s AND is_pendiente = FALSE
+                    )
+                    SELECT
+                    c.id AS caja_id,
+                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                    a.numero AS documento,
+                    a.nombre AS nombre,
+                    a.pdf_path
+                    FROM archivos a
+                    JOIN cajas c ON c.id = a.caja_id
+                    LEFT JOIN ranked r ON r.id = c.id
+                    WHERE a.grupo_id = %s
+                      AND (
+                        a.numero = %s
+                        OR replace(a.nombre, '.', '') = %s
+                      )
+                    ORDER BY a.numero
+                """, (grupo_id, grupo_id, doc, buscar_clean))
 
-            resultado = cur.fetchone()
-        except ValueError:
+            rows = cur.fetchall()
+            if rows:
+                resultado = rows
+            else:
+                resultado = ("no",)
+        else:
             cur.execute("""
                 WITH ranked AS (
                 SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
@@ -1054,10 +1090,11 @@ def archivos():
                 LEFT JOIN ranked r ON r.id = c.id
                 WHERE a.nombre ILIKE %s AND a.grupo_id = %s
                 ORDER BY a.numero
-                LIMIT 1;
             """, (grupo_id, f"%{buscar}%", grupo_id))
-            resultado = cur.fetchone()
-            if not resultado:
+            rows = cur.fetchall()
+            if rows:
+                resultado = rows
+            else:
                 resultado = ("no",)
 
     # Modo ediciÃ³n (quÃ© documento estÃ¡ en ediciÃ³n)
@@ -1583,56 +1620,85 @@ def archivo():
         conn = get_db()
         cur = conn.cursor()
         try:
-            doc = int(buscar_raw)
+            buscar_clean = buscar_raw.replace(".", "")
+            if buscar_clean.isdigit():
+                doc = int(buscar_clean)
+                if "." in buscar_raw:
+                    cur.execute("""
+                        WITH ranked AS (
+                            SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                            FROM cajas
+                            WHERE grupo_id = %s AND is_pendiente = FALSE
+                        )
+                        SELECT
+                            c.id AS caja_id,
+                            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                            a.numero AS documento,
+                            a.nombre AS nombre,
+                            a.pdf_path
+                        FROM archivos a
+                        JOIN cajas c ON c.id = a.caja_id
+                        LEFT JOIN ranked r ON r.id = c.id
+                        WHERE a.grupo_id = %s
+                          AND (
+                            replace(to_char(a.numero, 'FM999G999G999G999G999'), ',', '.') = %s
+                            OR a.nombre ILIKE %s
+                          )
+                        ORDER BY a.numero
+                    """, (grupo_id, grupo_id, buscar_raw, buscar_raw))
+                else:
+                    cur.execute("""
+                        WITH ranked AS (
+                            SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                            FROM cajas
+                            WHERE grupo_id = %s AND is_pendiente = FALSE
+                        )
+                        SELECT
+                            c.id AS caja_id,
+                            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                            a.numero AS documento,
+                            a.nombre AS nombre,
+                            a.pdf_path
+                        FROM archivos a
+                        JOIN cajas c ON c.id = a.caja_id
+                        LEFT JOIN ranked r ON r.id = c.id
+                        WHERE a.grupo_id = %s
+                          AND (
+                            a.numero = %s
+                            OR replace(a.nombre, '.', '') = %s
+                          )
+                        ORDER BY a.numero
+                    """, (grupo_id, grupo_id, doc, buscar_clean))
 
-            cur.execute("""
-                WITH ranked AS (
-                    SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
-                    FROM cajas
-                    WHERE grupo_id = %s AND is_pendiente = FALSE
-                )
-                SELECT
-                    c.id AS caja_id,
-                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                    a.numero AS documento,
-                    a.nombre AS nombre,
-                    a.pdf_path
-                FROM archivos a
-                JOIN cajas c ON c.id = a.caja_id
-                LEFT JOIN ranked r ON r.id = c.id
-                WHERE a.numero = %s AND a.grupo_id = %s
-            """, (grupo_id, doc, grupo_id))
-
-            rows = cur.fetchall()
-            if rows:
-                resultado = rows
+                rows = cur.fetchall()
+                if rows:
+                    resultado = rows
+                else:
+                    resultado = ("no",)
             else:
-                resultado = ("no",)
-
-        except ValueError:
-            cur.execute("""
-                WITH ranked AS (
-                    SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
-                    FROM cajas
-                    WHERE grupo_id = %s AND is_pendiente = FALSE
-                )
-                SELECT
-                    c.id AS caja_id,
-                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                    a.numero AS documento,
-                    a.nombre AS nombre,
-                    a.pdf_path
-                FROM archivos a
-                JOIN cajas c ON c.id = a.caja_id
-                LEFT JOIN ranked r ON r.id = c.id
-                WHERE a.nombre ILIKE %s AND a.grupo_id = %s
-                ORDER BY a.numero
-            """, (grupo_id, f"%{buscar_raw}%", grupo_id))
-            rows = cur.fetchall()
-            if rows:
-                resultado = rows
-            else:
-                resultado = ("no",)
+                cur.execute("""
+                    WITH ranked AS (
+                        SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                        FROM cajas
+                        WHERE grupo_id = %s AND is_pendiente = FALSE
+                    )
+                    SELECT
+                        c.id AS caja_id,
+                        CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                        a.numero AS documento,
+                        a.nombre AS nombre,
+                        a.pdf_path
+                    FROM archivos a
+                    JOIN cajas c ON c.id = a.caja_id
+                    LEFT JOIN ranked r ON r.id = c.id
+                    WHERE a.nombre ILIKE %s AND a.grupo_id = %s
+                    ORDER BY a.numero
+                """, (grupo_id, f"%{buscar_raw}%", grupo_id))
+                rows = cur.fetchall()
+                if rows:
+                    resultado = rows
+                else:
+                    resultado = ("no",)
         finally:
             cur.close()
             conn.close()

@@ -34,6 +34,7 @@ from psycopg2.extras import execute_values, Json
 from db import get_db
 from io import BytesIO
 from datetime import datetime
+import json
 from collections import defaultdict
 from openpyxl.styles import Font
 from flask import flash
@@ -1143,79 +1144,88 @@ def archivos():
     edit_num = request.args.get("edit", "").strip()
     edit_num = int(edit_num) if edit_num.isdigit() else None
 
-    # Ãšltimos movimientos (10)
+    # Ultimos movimientos (20)
     cur.execute("""
         WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
             WHERE grupo_id = %s AND is_pendiente = FALSE
-        ),
-        base AS (
-            SELECT
-                l.fecha,
-                l.accion,
-                NULLIF(substring(l.accion from 'caja=([0-9]+)'), '')::int AS caja_id,
-                NULLIF(substring(l.accion from 'numero_old=([0-9]+)'), '')::bigint AS numero_old,
-                NULLIF(substring(l.accion from 'numero_new=([0-9]+)'), '')::bigint AS numero_new,
-                substring(l.accion from 'nombre_old=([^|]+)') AS nombre_old,
-                substring(l.accion from 'nombre_new=([^|]+)') AS nombre_new,
-                substring(l.accion from 'tipo=([^|]+)') AS tipo_raw
-            FROM logs l
-            WHERE l.accion LIKE 'ARCHIVO|tipo=%'
-              AND l.grupo_id = %s
-            ORDER BY l.fecha DESC
-            LIMIT 10
         )
         SELECT
-            ROW_NUMBER() OVER (ORDER BY b.fecha DESC) AS movimiento,
-
-            CASE
-                WHEN c.is_pendiente THEN 0
-                ELSE r.caja_visible
-            END AS caja,
-
-            COALESCE(b.numero_new, b.numero_old, a.numero) AS documento,
-            COALESCE(b.nombre_new, b.nombre_old, a.nombre, '') AS nombre,
-
-            CASE
-                WHEN b.tipo_raw = 'REGISTRO' THEN 'Registro'
-                WHEN b.tipo_raw = 'MODIFICACION' THEN 'ModificaciÃ³n'
-                WHEN b.tipo_raw = 'ELIMINACION' THEN 'EliminaciÃ³n'
-                ELSE 'Otro'
-            END AS tipo,
-
-            CASE
-                WHEN b.tipo_raw = 'REGISTRO' THEN
-                    'Se registrÃ³ el documento y el nombre.'
-                WHEN b.tipo_raw = 'ELIMINACION' THEN
-                    'Se eliminÃ³ el documento y su nombre.'
-                WHEN b.tipo_raw = 'MODIFICACION' THEN
-                    TRIM(
-                        BOTH ', ' FROM
-                        (CASE
-                            WHEN b.numero_old IS NOT NULL AND b.numero_new IS NOT NULL AND b.numero_old <> b.numero_new
-                            THEN 'Documento: ' || b.numero_old || ' â†’ ' || b.numero_new || ', '
-                            ELSE ''
-                        END)
-                        ||
-                        (CASE
-                            WHEN COALESCE(b.nombre_old,'') <> COALESCE(b.nombre_new,'')
-                            THEN 'Nombre: ' || COALESCE(b.nombre_old,'') || ' â†’ ' || COALESCE(b.nombre_new,'')
-                            ELSE ''
-                        END)
-                    )
-                ELSE
-                    'Sin detalle'
-            END AS detalle
-        FROM base b
-        LEFT JOIN archivos a ON a.numero = COALESCE(b.numero_new, b.numero_old)
-                           AND a.grupo_id = %s
-        LEFT JOIN cajas c ON c.id = COALESCE(b.caja_id, a.caja_id)
-                         AND c.grupo_id = %s
+            c.id,
+            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_visible
+        FROM cajas c
         LEFT JOIN ranked r ON r.id = c.id
-        ORDER BY movimiento
-    """, (grupo_id, grupo_id, grupo_id))
-    movimientos = cur.fetchall()
+        WHERE c.grupo_id = %s
+    """, (grupo_id, grupo_id))
+    caja_map = {row[0]: row[1] for row in cur.fetchall()}
+
+    cur.execute("""
+        SELECT
+            m.id,
+            m.fecha,
+            m.entidad,
+            m.entidad_id,
+            m.accion,
+            m.datos_antes,
+            m.datos_despues,
+            a.numero
+        FROM movimientos m
+        LEFT JOIN archivos a ON a.id = m.entidad_id AND m.entidad = 'archivo'
+        WHERE m.grupo_id = %s
+        ORDER BY m.fecha DESC
+        LIMIT 20
+    """, (grupo_id,))
+    mov_rows = cur.fetchall()
+
+    def _json_or_none(val):
+        if val is None:
+            return None
+        if isinstance(val, (dict, list)):
+            return val
+        try:
+            return json.loads(val)
+        except Exception:
+            return None
+
+    def _fmt_num(val):
+        try:
+            return f"{int(val):,}".replace(",", ".")
+        except Exception:
+            return val
+
+    movimientos = []
+    for mid, fecha, entidad, entidad_id, accion, antes_raw, despues_raw, numero in mov_rows:
+        antes = _json_or_none(antes_raw) or {}
+        despues = _json_or_none(despues_raw) or {}
+
+        doc_num_raw = numero or antes.get("numero") or despues.get("numero")
+        doc_num = _fmt_num(doc_num_raw)
+        caja_old = antes.get("caja_id")
+        caja_new = despues.get("caja_id")
+
+        caja_old_vis = caja_map.get(caja_old, caja_old)
+        caja_new_vis = caja_map.get(caja_new, caja_new)
+        caja_vis = caja_map.get(entidad_id, entidad_id)
+
+        if entidad == "archivo" and accion == "ARCHIVO_MOVER":
+            texto = f"Se movio el documento {doc_num} de la caja {caja_old_vis} a la caja {caja_new_vis}"
+        elif entidad == "archivo" and accion == "CREAR_ARCHIVO":
+            texto = f"Se creo el documento {doc_num}"
+        elif entidad == "archivo" and accion == "MODIFICAR_ARCHIVO":
+            texto = f"Se modifico el documento {doc_num}"
+        elif entidad == "archivo" and accion == "ELIMINAR_ARCHIVO":
+            texto = f"Se elimino el documento {doc_num}"
+        elif entidad == "caja" and accion == "CREAR_CAJA":
+            texto = f"Se creo la caja numero {caja_vis}"
+        elif entidad == "caja" and accion == "MODIFICAR_CAJA":
+            texto = f"Se modifico la caja numero {caja_vis}"
+        elif entidad == "caja" and accion == "ELIMINAR_CAJA":
+            texto = f"Se elimino la caja numero {caja_vis}"
+        else:
+            texto = f"{accion}"
+
+        movimientos.append((fecha, texto, mid))
 
     cur.close()
     conn.close()

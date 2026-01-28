@@ -51,135 +51,27 @@
 <hr>
 
 <!-- ✅ ULTIMOS MOVIMIENTOS -->
-<h3>🕒 Ultimos movimientos (Archivos)</h3>
+<h3>🕒 Ultimos movimientos (20)</h3>
 
 {% if movimientos and movimientos|length > 0 %}
 <table border="1" cellpadding="8" cellspacing="0">
     <tr>
-        <th>#</th>
-        <th>Caja</th>
-        <th>Documento</th>
-        <th>Nombre</th>
-        <th>Movimiento</th>
+        <th>Fecha</th>
         <th>Accion</th>
+        <th>ID</th>
     </tr>
 
     {% for m in movimientos %}
     <tr>
         <td>{{ m[0] }}</td>
-
-        <td>
-            {% if m[1] == 0 %}
-              <strong>0</strong> (Pendiente)
-            {% else %}
-              {{ m[1] }}
-            {% endif %}
-        </td>
-
-        <td>{{ m[2]|puntos }}</td>
-        <td>{{ m[3]|upper }}</td>
-        <td>{{ m[4] }}</td>
-
-        <td>
-            <a href="{{ url_for('archivos') }}?buscar={{ m[2] }}">🔍 Ver</a>
-
-            <button type="button"
-                    data-tipo="{{ m[4] }}"
-                    data-detalle="{{ m[5] | e }}"
-                    onclick="verDetalleMovimiento(this)">
-                ℹ️ Detalle
-            </button>
-        </td>
+        <td>{{ m[1] }}</td>
+        <td>{{ m[2] }}</td>
     </tr>
     {% endfor %}
 </table>
 {% else %}
 <p style="color:#666;">Todavia no hay movimientos recientes.</p>
 {% endif %}
-
-<!-- ✅ MODAL DETALLE -->
-<style>
-  .modal-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.35);
-    z-index: 999;
-  }
-  .modal {
-    width: min(520px, 92vw);
-    background: white;
-    border-radius: 12px;
-    padding: 18px 18px 14px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1000;
-    display: none;
-  }
-  .modal h4 { margin: 0 0 8px; }
-  .modal .sub { color:#666; font-size: 13px; margin: 0 0 10px; }
-  .modal pre {
-    background: #f7f7f7;
-    padding: 12px;
-    border-radius: 8px;
-    white-space: pre-wrap;
-    font-size: 14px;
-    margin: 0;
-  }
-  .modal .actions {
-    display:flex;
-    justify-content: flex-end;
-    margin-top: 12px;
-  }
-  .modal .btn {
-    padding: 10px 14px;
-    border-radius: 8px;
-    border: 1px solid #999;
-    background: #f7f7f7;
-    cursor: pointer;
-  }
-</style>
-
-<div class="modal-overlay" id="overlayDetalle"></div>
-
-<div class="modal" id="modalDetalle">
-  <h4>📋 Detalle del movimiento</h4>
-  <p class="sub" id="detalleTipo"></p>
-  <pre id="detalleTexto"></pre>
-
-  <div class="actions">
-    <button class="btn" onclick="cerrarDetalle()">Cerrar</button>
-  </div>
-</div>
-
-<script>
-function verDetalleMovimiento(btn) {
-  const tipo = btn.getAttribute("data-tipo") || "";
-  const detalle = btn.getAttribute("data-detalle") || "Sin detalle";
-
-  document.getElementById("detalleTipo").innerText = "Tipo: " + tipo;
-  document.getElementById("detalleTexto").innerText = detalle;
-
-  document.getElementById("overlayDetalle").style.display = "block";
-  document.getElementById("modalDetalle").style.display = "block";
-}
-
-function cerrarDetalle() {
-  document.getElementById("overlayDetalle").style.display = "none";
-  document.getElementById("modalDetalle").style.display = "none";
-}
-
-document.addEventListener("click", function(e){
-  if (e.target === document.getElementById("overlayDetalle")) cerrarDetalle();
-});
-
-document.addEventListener("keydown", function(e){
-  if (e.key === "Escape") cerrarDetalle();
-});
-</script>
 
 <hr>
 

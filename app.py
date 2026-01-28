@@ -632,19 +632,94 @@ def grupos():
             (g[0],)
         )
         miembros = cur.fetchall()
+        cur.execute(
+            """
+            WITH ranked AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                FROM cajas
+                WHERE grupo_id = %s AND is_pendiente = FALSE
+            )
+            SELECT
+                c.id,
+                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_visible
+            FROM cajas c
+            LEFT JOIN ranked r ON r.id = c.id
+            WHERE c.grupo_id = %s
+            """,
+            (g[0], g[0])
+        )
+        caja_map = {row[0]: row[1] for row in cur.fetchall()}
+
+        def _json_or_none(val):
+            if val is None:
+                return None
+            if isinstance(val, (dict, list)):
+                return val
+            try:
+                return json.loads(val)
+            except Exception:
+                return None
+
+        def _fmt_num(val):
+            try:
+                return f"{int(val):,}".replace(",", ".")
+            except Exception:
+                return val
+
         movimientos_por_usuario = {}
         for m in miembros:
             cur.execute(
                 """
-                SELECT fecha, accion, entidad, entidad_id
-                FROM movimientos
-                WHERE usuario_id = %s AND grupo_id = %s
-                ORDER BY fecha DESC
-                LIMIT 5
+                SELECT
+                    m.id,
+                    m.fecha,
+                    m.entidad,
+                    m.entidad_id,
+                    m.accion,
+                    m.datos_antes,
+                    m.datos_despues,
+                    a.numero
+                FROM movimientos m
+                LEFT JOIN archivos a ON a.id = m.entidad_id AND m.entidad = 'archivo'
+                WHERE m.usuario_id = %s AND m.grupo_id = %s
+                ORDER BY m.fecha DESC
+                LIMIT 20
                 """,
                 (m[0], g[0])
             )
-            movimientos_por_usuario[m[0]] = cur.fetchall()
+            rows = cur.fetchall()
+            movs = []
+            for mid, fecha, entidad, entidad_id, accion, antes_raw, despues_raw, numero in rows:
+                antes = _json_or_none(antes_raw) or {}
+                despues = _json_or_none(despues_raw) or {}
+
+                doc_num_raw = numero or antes.get("numero") or despues.get("numero")
+                doc_num = _fmt_num(doc_num_raw)
+                caja_old = antes.get("caja_id")
+                caja_new = despues.get("caja_id")
+                caja_old_vis = caja_map.get(caja_old, caja_old)
+                caja_new_vis = caja_map.get(caja_new, caja_new)
+                caja_vis = caja_map.get(entidad_id, entidad_id)
+
+                if entidad == "archivo" and accion == "ARCHIVO_MOVER":
+                    texto = f"Se movio el documento {doc_num} de la caja {caja_old_vis} a la caja {caja_new_vis}"
+                elif entidad == "archivo" and accion == "CREAR_ARCHIVO":
+                    texto = f"Se creo el documento {doc_num}"
+                elif entidad == "archivo" and accion == "MODIFICAR_ARCHIVO":
+                    texto = f"Se modifico el documento {doc_num}"
+                elif entidad == "archivo" and accion == "ELIMINAR_ARCHIVO":
+                    texto = f"Se elimino el documento {doc_num}"
+                elif entidad == "caja" and accion == "CREAR_CAJA":
+                    texto = f"Se creo la caja numero {caja_vis}"
+                elif entidad == "caja" and accion == "MODIFICAR_CAJA":
+                    texto = f"Se modifico la caja numero {caja_vis}"
+                elif entidad == "caja" and accion == "ELIMINAR_CAJA":
+                    texto = f"Se elimino la caja numero {caja_vis}"
+                else:
+                    texto = f"{accion}"
+
+                movs.append((fecha, texto, mid))
+            movimientos_por_usuario[m[0]] = movs
         grupos_info.append((g[0], g[1], g[2], g[3], miembros))
     cur.close()
     conn.close()

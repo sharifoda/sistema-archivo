@@ -194,14 +194,13 @@
       </tr>
       <tr class="mov-row" id="mov-row-{{ m[0] }}">
         <td colspan="3">
-          <strong>Ultimos movimientos</strong>
+          <strong>Ultimos movimientos (20)</strong>
           {% set movs = movimientos_por_usuario.get(m[0], []) %}
           {% if movs and movs|length > 0 %}
             <table class="mov-table">
               <tr>
                 <th>Fecha</th>
                 <th>Accion</th>
-                <th>Entidad</th>
                 <th>ID</th>
               </tr>
               {% for mv in movs %}
@@ -209,7 +208,6 @@
                 <td>{{ mv[0] }}</td>
                 <td>{{ mv[1] }}</td>
                 <td>{{ mv[2] }}</td>
-                <td>{{ mv[3] }}</td>
               </tr>
               {% endfor %}
             </table>

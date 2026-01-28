@@ -368,6 +368,30 @@ def grupos():
     if not login_requerido():
         return redirect(url_for("login"))
 
+    if request.method == "POST" and not admin_requerido():
+        accion = request.form.get("accion")
+        if accion != "actualizar_permiso":
+            flash("Accion no permitida.", "error")
+            return redirect(url_for("grupos"))
+
+        if not supervisor_requerido():
+            flash("No tienes permiso para modificar usuarios.", "error")
+            return redirect(url_for("grupos"))
+
+        grupo_id = int(request.form.get("grupo_id"))
+        usuario_id = int(request.form.get("usuario_id"))
+        puede_eliminar = request.form.get("puede_eliminar") == "1"
+        puede_editar = request.form.get("puede_editar") == "1"
+
+        grupos_usuario = {g[0] for g in obtener_grupos_usuario(session.get("usuario_id"))}
+        if grupo_id not in grupos_usuario:
+            flash("No tienes permiso para ese grupo.", "error")
+            return redirect(url_for("grupos"))
+
+        agregar_usuario_a_grupo(usuario_id, grupo_id, puede_eliminar, puede_editar)
+        flash("Permisos actualizados.", "success")
+        return redirect(url_for("grupos"))
+
     if admin_requerido():
         if request.method == "POST":
             accion = request.form.get("accion")
@@ -607,6 +631,19 @@ def grupos():
             (g[0],)
         )
         miembros = cur.fetchall()
+        movimientos_por_usuario = {}
+        for m in miembros:
+            cur.execute(
+                """
+                SELECT fecha, accion, entidad, entidad_id
+                FROM movimientos
+                WHERE usuario_id = %s AND grupo_id = %s
+                ORDER BY fecha DESC
+                LIMIT 5
+                """,
+                (m[0], g[0])
+            )
+            movimientos_por_usuario[m[0]] = cur.fetchall()
         grupos_info.append((g[0], g[1], g[2], g[3], miembros))
     cur.close()
     conn.close()
@@ -615,7 +652,8 @@ def grupos():
         "grupos.html",
         grupos=grupos_info,
         es_admin=False,
-        empresa_nombre=empresa_nombre
+        empresa_nombre=empresa_nombre,
+        movimientos_por_usuario=movimientos_por_usuario
     )
 
 

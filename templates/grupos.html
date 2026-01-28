@@ -43,6 +43,18 @@
   .empresa-actions .btn-link { height:30px; }
   .action-buttons { display:flex; gap:8px; align-items:center; }
   .action-buttons .btn { min-width:120px; text-align:center; }
+  .user-toggle {
+    background:none;
+    border:none;
+    padding:0;
+    margin:0;
+    color:#000;
+    cursor:pointer;
+    text-decoration:underline;
+  }
+  .mov-row { display:none; }
+  .mov-table { width:100%; border-collapse:collapse; margin-top:6px; }
+  .mov-table th, .mov-table td { border:1px solid #000; padding:6px; }
 </style>
 
 {% if es_admin %}
@@ -158,13 +170,53 @@
     {% if miembros and miembros|length > 0 %}
       {% for m in miembros %}
       <tr>
-        <td>{{ m[1] }}</td>
         <td>
-          {% if m[2] %}Eliminar{% else %}Sin eliminar{% endif %}
-          /
-          {% if m[3] %}Editar{% else %}Sin editar{% endif %}
+          <button type="button" class="user-toggle" data-user="{{ m[0] }}">{{ m[1] }}</button>
+        </td>
+        <td>
+          <form method="post" style="display:inline;">
+            <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+            <input type="hidden" name="accion" value="actualizar_permiso">
+            <input type="hidden" name="grupo_id" value="{{ grupos[0][0] }}">
+            <input type="hidden" name="usuario_id" value="{{ m[0] }}">
+            <label style="margin-right:10px;">
+              <input type="checkbox" name="puede_eliminar" value="1" {% if m[2] %}checked{% endif %}>
+              Eliminar
+            </label>
+            <label style="margin-right:10px;">
+              <input type="checkbox" name="puede_editar" value="1" {% if m[3] %}checked{% endif %}>
+              Editar
+            </label>
+            <button type="submit" class="btn btn-link">Guardar</button>
+          </form>
         </td>
         <td>{{ m[4] or "-" }}</td>
+      </tr>
+      <tr class="mov-row" id="mov-row-{{ m[0] }}">
+        <td colspan="3">
+          <strong>Ultimos movimientos</strong>
+          {% set movs = movimientos_por_usuario.get(m[0], []) %}
+          {% if movs and movs|length > 0 %}
+            <table class="mov-table">
+              <tr>
+                <th>Fecha</th>
+                <th>Accion</th>
+                <th>Entidad</th>
+                <th>ID</th>
+              </tr>
+              {% for mv in movs %}
+              <tr>
+                <td>{{ mv[0] }}</td>
+                <td>{{ mv[1] }}</td>
+                <td>{{ mv[2] }}</td>
+                <td>{{ mv[3] }}</td>
+              </tr>
+              {% endfor %}
+            </table>
+          {% else %}
+            <div style="margin-top:6px;">Sin movimientos.</div>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     {% else %}
@@ -258,6 +310,15 @@ function cerrarModal(id) {
   document.getElementById("overlay-" + id).style.display = "none";
   document.getElementById("modal-" + id).style.display = "none";
 }
+document.addEventListener("click", function(e){
+  const btn = e.target.closest(".user-toggle");
+  if (!btn) return;
+  const userId = btn.getAttribute("data-user");
+  const row = document.getElementById("mov-row-" + userId);
+  if (row) {
+    row.style.display = row.style.display === "table-row" ? "none" : "table-row";
+  }
+});
 document.addEventListener("click", function(e){
   {% if es_admin %}
   {% for g in grupos %}

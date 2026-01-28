@@ -868,6 +868,11 @@ def cajas():
 # ---------------- ARCHIVOS ----------------
 @app.route("/archivos", methods=["GET", "POST"])
 def archivos():
+    # Pestaña antigua: redirigir a Archivo
+    return redirect(url_for("archivo"))
+
+@app.route("/archivos_legacy", methods=["GET", "POST"])
+def archivos_legacy():
     if not login_requerido():
         return redirect(url_for("login"))
 

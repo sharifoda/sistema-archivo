@@ -36,7 +36,6 @@ from io import BytesIO
 from datetime import datetime
 import json
 from collections import defaultdict
-from difflib import SequenceMatcher
 from openpyxl.styles import Font
 from flask import flash
 import threading
@@ -2462,6 +2461,7 @@ def archivo_duplicados():
 
     grupos = []
     usados = set()
+    items_by_id = {it["id"]: it for it in items}
 
     # --- 1) Duplicados por numero (sin importar tipo_doc)
     por_numero = defaultdict(list)
@@ -2476,19 +2476,61 @@ def archivo_duplicados():
             })
             usados.update([x["id"] for x in lst])
 
-    # --- 2) Duplicados por nombre similar
-    candidatos = [it for it in items if it["id"] not in usados and it["nombre"]]
-    # bucket por prefijo para limitar comparaciones
-    buckets = defaultdict(list)
-    for it in candidatos:
-        key = normalizar_nombre_clave(it["nombre"]).replace(" ", "")
-        pref = key[:3] if len(key) >= 3 else key
-        buckets[pref].append(it)
+    # --- 2) Duplicados por nombre similar (Postgres pg_trgm)
+    # Usamos similitud en nombre + similitud en numero (>= 0.75)
+    candidatos_ids = [it["id"] for it in items if it["id"] not in usados and it["nombre"]]
+    pairs = []
+    if candidatos_ids:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            if usados:
+                cur.execute(
+                    """
+                    SELECT a.id, b.id
+                    FROM archivos a
+                    JOIN archivos b
+                      ON a.grupo_id = b.grupo_id
+                     AND a.id < b.id
+                    WHERE a.grupo_id = %s
+                      AND a.nombre <> '' AND b.nombre <> ''
+                      AND a.nombre % b.nombre
+                      AND similarity(a.nombre, b.nombre) >= 0.88
+                      AND (a.numero::text % b.numero::text)
+                      AND similarity(a.numero::text, b.numero::text) >= 0.75
+                      AND a.id <> ALL(%s)
+                      AND b.id <> ALL(%s)
+                    """,
+                    (grupo_id, list(usados), list(usados))
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT a.id, b.id
+                    FROM archivos a
+                    JOIN archivos b
+                      ON a.grupo_id = b.grupo_id
+                     AND a.id < b.id
+                    WHERE a.grupo_id = %s
+                      AND a.nombre <> '' AND b.nombre <> ''
+                      AND a.nombre % b.nombre
+                      AND similarity(a.nombre, b.nombre) >= 0.88
+                      AND (a.numero::text % b.numero::text)
+                      AND similarity(a.numero::text, b.numero::text) >= 0.75
+                    """,
+                    (grupo_id,)
+                )
+            pairs = cur.fetchall()
+        except Exception:
+            app.logger.exception("Error buscando duplicados por nombre")
+        finally:
+            cur.close()
+            conn.close()
 
     # Union-Find simple
-    parent = {it["id"]: it["id"] for it in candidatos}
-
+    parent = {}
     def find(x):
+        parent.setdefault(x, x)
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
@@ -2499,28 +2541,23 @@ def archivo_duplicados():
         if ra != rb:
             parent[rb] = ra
 
-    def doc_sim(a, b):
-        sa = str(a) if a is not None else ""
-        sb = str(b) if b is not None else ""
-        if not sa or not sb:
-            return 0.0
-        return SequenceMatcher(None, sa, sb).ratio()
-
-    for pref, lst in buckets.items():
-        n = len(lst)
-        for i in range(n):
-            name_i = normalizar_nombre_clave(lst[i]["nombre"])
-            for j in range(i + 1, n):
-                name_j = normalizar_nombre_clave(lst[j]["nombre"])
-                if abs(len(name_i) - len(name_j)) > 4:
-                    continue
-                ratio = SequenceMatcher(None, name_i, name_j).ratio()
-                if ratio >= 0.88 and doc_sim(lst[i]["numero"], lst[j]["numero"]) >= 0.75:
-                    union(lst[i]["id"], lst[j]["id"])
+    for a_id, b_id in pairs:
+        union(a_id, b_id)
 
     grupos_nombre = defaultdict(list)
-    for it in candidatos:
-        grupos_nombre[find(it["id"])].append(it)
+    for a_id, b_id in pairs:
+        root = find(a_id)
+        if a_id in items_by_id:
+            grupos_nombre[root].append(items_by_id[a_id])
+        if b_id in items_by_id:
+            grupos_nombre[root].append(items_by_id[b_id])
+
+    # deduplicar items dentro de cada grupo
+    for k in list(grupos_nombre.keys()):
+        uniq = {}
+        for it in grupos_nombre[k]:
+            uniq[it["id"]] = it
+        grupos_nombre[k] = list(uniq.values())
 
     for _, lst in grupos_nombre.items():
         if len(lst) > 1:

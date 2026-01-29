@@ -2186,12 +2186,12 @@ def archivo_caja(caja_id):
         return redirect(url_for("archivo"))
 
     # archivos de la caja (incluye pdf_path para habilitar Ver PDF)
-      cur.execute("""
-          SELECT a.numero, a.tipo_doc, a.nombre, a.pdf_path
-          FROM archivos a
-          WHERE a.caja_id = %s AND a.grupo_id = %s
-          ORDER BY a.numero
-      """, (caja_id, grupo_id))
+    cur.execute("""
+        SELECT a.numero, a.tipo_doc, a.nombre, a.pdf_path
+        FROM archivos a
+        WHERE a.caja_id = %s AND a.grupo_id = %s
+        ORDER BY a.numero
+    """, (caja_id, grupo_id))
     archivos = cur.fetchall()
 
     cur.close()

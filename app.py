@@ -1568,21 +1568,21 @@ def archivo():
                 grupo_id
             )
 
-          registrar_movimiento(
-              session.get("usuario_id"),
-              grupo_id,
-              entidad="archivo",
-              entidad_id=archivo_id,
-              accion="CREAR_ARCHIVO",
-              datos_despues={
-                  "id": archivo_id,
-                  "numero": numero,
-                  "nombre": nombre,
-                  "caja_id": caja_id,
-                  "pdf_path": pdf_name,
-                  "tipo_doc": tipo_doc,
-              },
-          )
+            registrar_movimiento(
+                session.get("usuario_id"),
+                grupo_id,
+                entidad="archivo",
+                entidad_id=archivo_id,
+                accion="CREAR_ARCHIVO",
+                datos_despues={
+                    "id": archivo_id,
+                    "numero": numero,
+                    "nombre": nombre,
+                    "caja_id": caja_id,
+                    "pdf_path": pdf_name,
+                    "tipo_doc": tipo_doc,
+                },
+            )
 
             flash("Documento agregado correctamente.", "success")
             return redirect(url_for("archivo"))

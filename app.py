@@ -1137,7 +1137,7 @@ def archivos_legacy():
     cur = conn.cursor()
 
     # Listado normal (caja visible 1..N y caja 0)
-      cur.execute(
+    cur.execute(
           """
           WITH ranked AS (
               SELECT

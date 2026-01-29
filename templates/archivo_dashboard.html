@@ -55,7 +55,7 @@
   .modal .actions{
     display:flex; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap;
   }
-  .modal input{
+  .modal input, .modal select{
     width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
   }
 
@@ -181,6 +181,15 @@
     <label>Documento (numero)</label><br>
     <input type="number" name="numero" required><br><br>
 
+    <label>Tipo de documento</label><br>
+    <select name="tipo_doc" required>
+      <option value="">Selecciona</option>
+      <option value="CC">CC</option>
+      <option value="CE">CE</option>
+      <option value="TI">TI</option>
+      <option value="RC">RC</option>
+    </select><br><br>
+
     <label>Nombre</label><br>
     <input type="text" name="nombre"><br><br>
 
@@ -219,6 +228,15 @@
 
     <label>Documento (nuevo)</label><br>
     <input type="number" name="numero_new" id="numero_new" required><br><br>
+
+    <label>Tipo de documento</label><br>
+    <select name="tipo_doc_new" id="tipo_doc_new" required>
+      <option value="">Selecciona</option>
+      <option value="CC">CC</option>
+      <option value="CE">CE</option>
+      <option value="TI">TI</option>
+      <option value="RC">RC</option>
+    </select><br><br>
 
     <label>Nombre (nuevo)</label><br>
     <input type="text" name="nombre_new" id="nombre_new" required><br><br>

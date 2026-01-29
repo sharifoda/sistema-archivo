@@ -78,6 +78,14 @@ app.jinja_env.globals["csrf_token"] = csrf_token
 def normalizar_nombre(nombre):
     return nombre.upper() if nombre else nombre
 
+TIPO_DOC_OPCIONES = ("CC", "CE", "TI", "RC")
+
+def normalizar_tipo_doc(tipo_doc):
+    return tipo_doc.upper().strip() if tipo_doc else ""
+
+def es_tipo_doc_valido(tipo_doc):
+    return tipo_doc in TIPO_DOC_OPCIONES
+
 @app.template_filter("puntos")
 def formato_puntos(valor):
     try:
@@ -197,12 +205,12 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
             rmax = max(nums)
             caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=usuario_id)
 
-            values = [(n, f"Documento {n}", caja_id, usuario_id, grupo_id) for n in nums]
+            values = [(n, f"Documento {n}", caja_id, usuario_id, grupo_id, "CC") for n in nums]
             sql = """
-                INSERT INTO archivos (numero, nombre, caja_id, creado_por, grupo_id)
+                INSERT INTO archivos (numero, nombre, caja_id, creado_por, grupo_id, tipo_doc)
                 VALUES %s
                 ON CONFLICT (grupo_id, numero) DO NOTHING
-                RETURNING id, numero, nombre, caja_id
+                RETURNING id, numero, nombre, caja_id, tipo_doc
             """
             execute_values(cur, sql, values, page_size=1000)
             rows = cur.fetchall()
@@ -216,7 +224,7 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
                         r[0],
                         "CREAR_ARCHIVO",
                         None,
-                        Json({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3]}),
+                        Json({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
                         None,
                     )
                     for r in rows
@@ -965,12 +973,22 @@ def archivos_legacy():
         # âœ… AGREGAR (formulario de arriba)
         if accion == "agregar":
             numero = int(request.form["numero"])
+            tipo_doc = normalizar_tipo_doc(request.form.get("tipo_doc", ""))
+            if not es_tipo_doc_valido(tipo_doc):
+                flash("Tipo de documento invalido.", "error")
+                return redirect(url_for("archivos"))
             nombre = request.form.get("nombre", "").strip()
             if not nombre:
                 nombre = f"Documento {numero}"
             nombre = normalizar_nombre(nombre)
 
-            agregar_archivo(numero, nombre, grupo_id, creado_por=session.get("usuario_id"))
+            agregar_archivo(
+                numero,
+                nombre,
+                grupo_id,
+                creado_por=session.get("usuario_id"),
+                tipo_doc=tipo_doc
+            )
 
             # Log con info real
             conn = get_db()
@@ -1000,6 +1018,10 @@ def archivos_legacy():
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
             nombre_new = request.form.get("nombre_new", "").strip()
+            tipo_doc_new = normalizar_tipo_doc(request.form.get("tipo_doc_new", ""))
+            if not es_tipo_doc_valido(tipo_doc_new):
+                flash("Tipo de documento invalido.", "error")
+                return redirect(url_for("archivos"))
             nombre_new = normalizar_nombre(nombre_new)
             nombre_new = normalizar_nombre(nombre_new)
 
@@ -1008,7 +1030,7 @@ def archivos_legacy():
 
             # Antes:
             cur.execute(
-                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                "SELECT id, caja_id, numero, nombre, pdf_path, tipo_doc FROM archivos WHERE numero = %s AND grupo_id = %s",
                 (numero_old, grupo_id)
             )
             antes = cur.fetchone()
@@ -1017,6 +1039,7 @@ def archivos_legacy():
             numero_viejo = antes[2] if antes else numero_old
             nombre_viejo = antes[3] if antes else ""
             pdf_old = antes[4] if antes else None
+            tipo_doc_old = antes[5] if antes else "CC"
 
             # ... haces el UPDATE ...
 
@@ -1029,9 +1052,9 @@ def archivos_legacy():
 
             cur.execute("""
                 UPDATE archivos
-                SET numero = %s, nombre = %s
+                SET numero = %s, nombre = %s, tipo_doc = %s
                 WHERE numero = %s AND grupo_id = %s
-            """, (numero_new, nombre_new, numero_old, grupo_id))
+            """, (numero_new, nombre_new, tipo_doc_new, numero_old, grupo_id))
 
             conn.commit()
             cur.close()
@@ -1056,12 +1079,14 @@ def archivos_legacy():
                         "nombre": nombre_viejo,
                         "caja_id": caja_id,
                         "pdf_path": pdf_old,
+                        "tipo_doc": tipo_doc_old,
                     },
                     datos_despues={
                         "numero": numero_new,
                         "nombre": nombre_new,
                         "caja_id": caja_id,
                         "pdf_path": pdf_old,
+                        "tipo_doc": tipo_doc_new,
                     },
                 )
 
@@ -1112,24 +1137,25 @@ def archivos_legacy():
     cur = conn.cursor()
 
     # Listado normal (caja visible 1..N y caja 0)
-    cur.execute(
-        """
-        WITH ranked AS (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
-            FROM cajas
-            WHERE grupo_id = %s AND is_pendiente = FALSE
-        )
-        SELECT
-            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja,
-            a.numero AS documento,
-            a.nombre AS nombre
-        FROM archivos a
-        JOIN cajas c ON a.caja_id = c.id
-        LEFT JOIN ranked r ON r.id = c.id
-        WHERE a.grupo_id = %s
-        ORDER BY caja, a.numero
+      cur.execute(
+          """
+          WITH ranked AS (
+              SELECT
+                  id,
+                  ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+              FROM cajas
+              WHERE grupo_id = %s AND is_pendiente = FALSE
+          )
+          SELECT
+              CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja,
+              a.tipo_doc AS tipo_doc,
+              a.numero AS documento,
+              a.nombre AS nombre
+          FROM archivos a
+          JOIN cajas c ON a.caja_id = c.id
+          LEFT JOIN ranked r ON r.id = c.id
+          WHERE a.grupo_id = %s
+          ORDER BY caja, a.numero
         """,
         (grupo_id, grupo_id)
     )
@@ -1150,13 +1176,14 @@ def archivos_legacy():
                     FROM cajas
                     WHERE grupo_id = %s AND is_pendiente = FALSE
                     )
-                    SELECT
-                    c.id AS caja_id,
-                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                    a.numero AS documento,
-                    a.nombre AS nombre,
-                    a.pdf_path
-                    FROM archivos a
+                      SELECT
+                      c.id AS caja_id,
+                      CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                      a.tipo_doc AS tipo_doc,
+                      a.numero AS documento,
+                      a.nombre AS nombre,
+                      a.pdf_path
+                      FROM archivos a
                     JOIN cajas c ON c.id = a.caja_id
                     LEFT JOIN ranked r ON r.id = c.id
                     WHERE a.grupo_id = %s
@@ -1173,13 +1200,14 @@ def archivos_legacy():
                     FROM cajas
                     WHERE grupo_id = %s AND is_pendiente = FALSE
                     )
-                    SELECT
-                    c.id AS caja_id,
-                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                    a.numero AS documento,
-                    a.nombre AS nombre,
-                    a.pdf_path
-                    FROM archivos a
+                      SELECT
+                      c.id AS caja_id,
+                      CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                      a.tipo_doc AS tipo_doc,
+                      a.numero AS documento,
+                      a.nombre AS nombre,
+                      a.pdf_path
+                      FROM archivos a
                     JOIN cajas c ON c.id = a.caja_id
                     LEFT JOIN ranked r ON r.id = c.id
                     WHERE a.grupo_id = %s
@@ -1202,13 +1230,14 @@ def archivos_legacy():
                 FROM cajas
                 WHERE grupo_id = %s AND is_pendiente = FALSE
                 )
-                SELECT
-                c.id AS caja_id,
-                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                a.numero AS documento,
-                a.nombre AS nombre,
-                a.pdf_path
-                FROM archivos a
+                  SELECT
+                  c.id AS caja_id,
+                  CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                  a.tipo_doc AS tipo_doc,
+                  a.numero AS documento,
+                  a.nombre AS nombre,
+                  a.pdf_path
+                  FROM archivos a
                 JOIN cajas c ON c.id = a.caja_id
                 LEFT JOIN ranked r ON r.id = c.id
                 WHERE a.nombre ILIKE %s AND a.grupo_id = %s
@@ -1477,12 +1506,16 @@ def archivo():
             return redirect(url_for("archivo"))
 
         # ---------- Agregar Documento ----------
-        elif accion == "agregar_documento":
-            numero = int(request.form["numero"])
-            nombre = request.form.get("nombre", "").strip()
-            if not nombre:
-                nombre = f"Documento {numero}"
-            nombre = normalizar_nombre(nombre)
+      elif accion == "agregar_documento":
+          numero = int(request.form["numero"])
+          tipo_doc = normalizar_tipo_doc(request.form.get("tipo_doc", ""))
+          if not es_tipo_doc_valido(tipo_doc):
+              flash("Tipo de documento invalido.", "error")
+              return redirect(url_for("archivo"))
+          nombre = request.form.get("nombre", "").strip()
+          if not nombre:
+              nombre = f"Documento {numero}"
+          nombre = normalizar_nombre(nombre)
 
             conn = get_db()
             cur = conn.cursor()
@@ -1502,11 +1535,11 @@ def archivo():
 
             # 2) Insertar archivo YA con caja_id
             # (si tu tabla tiene otras columnas obligatorias, aquÃ­ se ajusta, pero esto es lo normal)
-            cur.execute("""
-                INSERT INTO archivos (caja_id, numero, nombre, pdf_path, grupo_id, creado_por)
-                VALUES (%s, %s, %s, NULL, %s, %s)
+          cur.execute("""
+                INSERT INTO archivos (caja_id, numero, nombre, pdf_path, grupo_id, creado_por, tipo_doc)
+                VALUES (%s, %s, %s, NULL, %s, %s, %s)
                 RETURNING id
-            """, (caja_id, numero, nombre, grupo_id, session.get("usuario_id")))
+            """, (caja_id, numero, nombre, grupo_id, session.get("usuario_id"), tipo_doc))
             archivo_id = cur.fetchone()[0]
 
             # 3) PDF opcional: guardar y actualizar pdf_path
@@ -1536,20 +1569,21 @@ def archivo():
                 grupo_id
             )
 
-            registrar_movimiento(
-                session.get("usuario_id"),
-                grupo_id,
-                entidad="archivo",
-                entidad_id=archivo_id,
-                accion="CREAR_ARCHIVO",
-                datos_despues={
-                    "id": archivo_id,
-                    "numero": numero,
-                    "nombre": nombre,
-                    "caja_id": caja_id,
-                    "pdf_path": pdf_name,
-                },
-            )
+          registrar_movimiento(
+              session.get("usuario_id"),
+              grupo_id,
+              entidad="archivo",
+              entidad_id=archivo_id,
+              accion="CREAR_ARCHIVO",
+              datos_despues={
+                  "id": archivo_id,
+                  "numero": numero,
+                  "nombre": nombre,
+                  "caja_id": caja_id,
+                  "pdf_path": pdf_name,
+                  "tipo_doc": tipo_doc,
+              },
+          )
 
             flash("Documento agregado correctamente.", "success")
             return redirect(url_for("archivo"))
@@ -1567,13 +1601,13 @@ def archivo():
 
             # datos antes de borrar para log + pdf_path para borrar del disco
             cur.execute(
-                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                "SELECT id, caja_id, numero, nombre, pdf_path, tipo_doc FROM archivos WHERE numero = %s AND grupo_id = %s",
                 (numero, grupo_id)
             )
             antes = cur.fetchone()
 
             if antes:
-                archivo_id, caja_old, numero_old, nombre_old, pdf_old = antes
+                archivo_id, caja_old, numero_old, nombre_old, pdf_old, tipo_doc_old = antes
                 registrar_movimiento(
                     session.get("usuario_id"),
                     grupo_id,
@@ -1586,6 +1620,7 @@ def archivo():
                         "nombre": nombre_old,
                         "caja_id": caja_old,
                         "pdf_path": pdf_old,
+                        "tipo_doc": tipo_doc_old,
                     },
                 )
 
@@ -1623,6 +1658,10 @@ def archivo():
             numero_new = int(request.form["numero_new"])
             nombre_new = request.form.get("nombre_new", "").strip()
             nombre_new = normalizar_nombre(nombre_new)
+            tipo_doc_new = normalizar_tipo_doc(request.form.get("tipo_doc_new", ""))
+            if not es_tipo_doc_valido(tipo_doc_new):
+                flash("Tipo de documento invalido.", "error")
+                return redirect(url_for("archivo"))
 
             # checkbox para eliminar PDF actual
             remove_pdf = request.form.get("remove_pdf") == "1"
@@ -1631,7 +1670,7 @@ def archivo():
             cur = conn.cursor()
 
             cur.execute(
-                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                "SELECT id, caja_id, numero, nombre, pdf_path, tipo_doc FROM archivos WHERE numero = %s AND grupo_id = %s",
                 (numero_old, grupo_id)
             )
             antes = cur.fetchone()
@@ -1642,7 +1681,7 @@ def archivo():
                 flash("No se encontrÃ³ el archivo a modificar.", "error")
                 return redirect(url_for("archivo"))
 
-            archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old = antes
+            archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old, tipo_doc_old = antes
 
             # Caja destino segÃºn rangos del numero_new
             cur.execute("""
@@ -1697,9 +1736,9 @@ def archivo():
             # 3) update final
             cur.execute("""
                 UPDATE archivos
-                SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s
+                SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s, tipo_doc = %s
                 WHERE numero = %s AND grupo_id = %s
-            """, (numero_new, nombre_new, caja_dest_id, pdf_name, numero_old, grupo_id))
+            """, (numero_new, nombre_new, caja_dest_id, pdf_name, tipo_doc_new, numero_old, grupo_id))
 
             conn.commit()
             cur.close()
@@ -1725,12 +1764,14 @@ def archivo():
                     "nombre": nombre_viejo,
                     "caja_id": caja_old,
                     "pdf_path": pdf_old,
+                    "tipo_doc": tipo_doc_old,
                 },
                 datos_despues={
                     "numero": numero_new,
                     "nombre": nombre_new,
                     "caja_id": caja_dest_id,
                     "pdf_path": pdf_name,
+                    "tipo_doc": tipo_doc_new,
                 },
             )
 
@@ -1762,13 +1803,14 @@ def archivo():
                             FROM cajas
                             WHERE grupo_id = %s AND is_pendiente = FALSE
                         )
-                        SELECT
-                            c.id AS caja_id,
-                            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                            a.numero AS documento,
-                            a.nombre AS nombre,
-                            a.pdf_path
-                        FROM archivos a
+                    SELECT
+                    c.id AS caja_id,
+                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                    a.tipo_doc AS tipo_doc,
+                    a.numero AS documento,
+                    a.nombre AS nombre,
+                    a.pdf_path
+                    FROM archivos a
                         JOIN cajas c ON c.id = a.caja_id
                         LEFT JOIN ranked r ON r.id = c.id
                         WHERE a.grupo_id = %s
@@ -1785,13 +1827,14 @@ def archivo():
                             FROM cajas
                             WHERE grupo_id = %s AND is_pendiente = FALSE
                         )
-                        SELECT
-                            c.id AS caja_id,
-                            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                            a.numero AS documento,
-                            a.nombre AS nombre,
-                            a.pdf_path
-                        FROM archivos a
+                    SELECT
+                    c.id AS caja_id,
+                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                    a.tipo_doc AS tipo_doc,
+                    a.numero AS documento,
+                    a.nombre AS nombre,
+                    a.pdf_path
+                    FROM archivos a
                         JOIN cajas c ON c.id = a.caja_id
                         LEFT JOIN ranked r ON r.id = c.id
                         WHERE a.grupo_id = %s
@@ -1814,13 +1857,14 @@ def archivo():
                         FROM cajas
                         WHERE grupo_id = %s AND is_pendiente = FALSE
                     )
-                    SELECT
-                        c.id AS caja_id,
-                        CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
-                        a.numero AS documento,
-                        a.nombre AS nombre,
-                        a.pdf_path
-                    FROM archivos a
+                SELECT
+                c.id AS caja_id,
+                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                a.tipo_doc AS tipo_doc,
+                a.numero AS documento,
+                a.nombre AS nombre,
+                a.pdf_path
+                FROM archivos a
                     JOIN cajas c ON c.id = a.caja_id
                     LEFT JOIN ranked r ON r.id = c.id
                     WHERE a.nombre ILIKE %s AND a.grupo_id = %s
@@ -1962,13 +2006,13 @@ def archivo_caja(caja_id):
 
             # obtener datos antes de borrar (para log)
             cur.execute(
-                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                "SELECT id, caja_id, numero, nombre, pdf_path, tipo_doc FROM archivos WHERE numero = %s AND grupo_id = %s",
                 (numero, grupo_id)
             )
             antes = cur.fetchone()
 
             if antes:
-                archivo_id, caja_old, numero_old, nombre_old, pdf_old = antes
+                archivo_id, caja_old, numero_old, nombre_old, pdf_old, tipo_doc_old = antes
                 registrar_movimiento(
                     session.get("usuario_id"),
                     grupo_id,
@@ -1981,6 +2025,7 @@ def archivo_caja(caja_id):
                         "nombre": nombre_old,
                         "caja_id": caja_old,
                         "pdf_path": pdf_old,
+                        "tipo_doc": tipo_doc_old,
                     },
                 )
 
@@ -2008,6 +2053,10 @@ def archivo_caja(caja_id):
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
             nombre_new = request.form.get("nombre_new", "").strip()
+            tipo_doc_new = normalizar_tipo_doc(request.form.get("tipo_doc_new", ""))
+            if not es_tipo_doc_valido(tipo_doc_new):
+                flash("Tipo de documento invalido.", "error")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             remove_pdf = request.form.get("remove_pdf") == "1"
             file = request.files.get("pdf")
@@ -2017,7 +2066,7 @@ def archivo_caja(caja_id):
 
             # Traer estado actual
             cur.execute(
-                "SELECT id, caja_id, numero, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                "SELECT id, caja_id, numero, nombre, pdf_path, tipo_doc FROM archivos WHERE numero = %s AND grupo_id = %s",
                 (numero_old, grupo_id)
             )
             row = cur.fetchone()
@@ -2027,7 +2076,7 @@ def archivo_caja(caja_id):
                 flash("No se encontro el archivo a modificar.", "error")
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
-            archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old = row
+            archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old, tipo_doc_old = row
 
             pdf_name = pdf_old
 
@@ -2070,9 +2119,10 @@ def archivo_caja(caja_id):
                 UPDATE archivos
                 SET numero = %s,
                     nombre = %s,
-                    pdf_path = %s
+                    pdf_path = %s,
+                    tipo_doc = %s
                 WHERE numero = %s AND grupo_id = %s
-            """, (numero_new, nombre_new, pdf_name, numero_old, grupo_id))
+            """, (numero_new, nombre_new, pdf_name, tipo_doc_new, numero_old, grupo_id))
 
             conn.commit()
             cur.close()
@@ -2089,12 +2139,14 @@ def archivo_caja(caja_id):
                     "nombre": nombre_viejo,
                     "caja_id": caja_old,
                     "pdf_path": pdf_old,
+                    "tipo_doc": tipo_doc_old,
                 },
                 datos_despues={
                     "numero": numero_new,
                     "nombre": nombre_new,
                     "caja_id": caja_old,
                     "pdf_path": pdf_name,
+                    "tipo_doc": tipo_doc_new,
                 },
             )
 
@@ -2135,12 +2187,12 @@ def archivo_caja(caja_id):
         return redirect(url_for("archivo"))
 
     # archivos de la caja (incluye pdf_path para habilitar Ver PDF)
-    cur.execute("""
-        SELECT a.numero, a.nombre, a.pdf_path
-        FROM archivos a
-        WHERE a.caja_id = %s AND a.grupo_id = %s
-        ORDER BY a.numero
-    """, (caja_id, grupo_id))
+      cur.execute("""
+          SELECT a.numero, a.tipo_doc, a.nombre, a.pdf_path
+          FROM archivos a
+          WHERE a.caja_id = %s AND a.grupo_id = %s
+          ORDER BY a.numero
+      """, (caja_id, grupo_id))
     archivos = cur.fetchall()
 
     cur.close()
@@ -2359,8 +2411,8 @@ def deshacer_movimiento(mov_id):
             elif accion == "ELIMINAR_ARCHIVO" and datos_antes:
                 cur.execute(
                     """
-                    INSERT INTO archivos (id, numero, nombre, caja_id, pdf_path, grupo_id, creado_por)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO archivos (id, numero, nombre, caja_id, pdf_path, grupo_id, creado_por, tipo_doc)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO NOTHING
                     """,
                     (
@@ -2371,6 +2423,7 @@ def deshacer_movimiento(mov_id):
                         datos_antes.get("pdf_path"),
                         grupo_id,
                         None,
+                        datos_antes.get("tipo_doc") or "CC",
                     )
                 )
             elif accion == "ARCHIVO_MOVER" and datos_antes:

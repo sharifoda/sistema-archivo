@@ -15,6 +15,7 @@ const csrfToken     = data.csrfToken || "";
 const BUSQ = {
   cajaId: null,
   cajaNum: null,
+  tipoDoc: null,
   doc: null,
   nombre: null,
   pdf: null
@@ -78,17 +79,19 @@ function escapeAttr(value) {
 /* =========================
    Modal editar desde búsqueda
    ========================= */
-function abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId) {
+function abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId, tipoDoc) {
   if (doc === null || doc === undefined) return;
 
   BUSQ.doc = doc;
   BUSQ.nombre = nombre;
   BUSQ.cajaNum = cajaNum;
   BUSQ.cajaId = cajaId;
+  BUSQ.tipoDoc = tipoDoc || "";
 
   document.getElementById("numero_old").value = BUSQ.doc;
   document.getElementById("numero_new").value = BUSQ.doc;
   document.getElementById("nombre_new").value = BUSQ.nombre || "";
+  document.getElementById("tipo_doc_new").value = BUSQ.tipoDoc || "";
 
   document.getElementById("editarInfo").innerText =
     "Editando documento: " +
@@ -132,8 +135,9 @@ document.addEventListener("click", function (e) {
   const nombre = btn.dataset.nombre || "";
   const cajaNum = Number(btn.dataset.cajaNum);
   const cajaId = Number(btn.dataset.cajaId);
+  const tipoDoc = btn.dataset.tipoDoc || "";
 
-  abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId);
+  abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId, tipoDoc);
 });
 
 /* =========================
@@ -160,9 +164,10 @@ if (resultado) {
         .map(row => {
           const cajaId = row[0];
           const cajaNum = row[1];
-          const doc = row[2];
-          const nombre = row[3];
-          const pdf = row.length > 4 ? row[4] : null;
+          const tipoDoc = row[2];
+          const doc = row[3];
+          const nombre = row[4];
+          const pdf = row.length > 5 ? row[5] : null;
           const nombreAttr = escapeAttr(nombre || "");
 
           const cajaTxt =
@@ -178,6 +183,7 @@ if (resultado) {
           return `
             <tr>
               <td>${cajaTxt}</td>
+              <td>${tipoDoc || ""}</td>
               <td>${formatMiles(doc)}</td>
               <td>${String(nombre || "").toUpperCase()}</td>
               <td>${pdf ? "Si" : "No"}</td>
@@ -186,6 +192,7 @@ if (resultado) {
                   <button type="button" class="btn-small btn-modificar-busq"
                           data-doc="${doc}"
                           data-nombre="${nombreAttr}"
+                          data-tipo-doc="${tipoDoc || ""}"
                           data-caja-num="${cajaNum}"
                           data-caja-id="${cajaId}">
                     Modificar
@@ -218,6 +225,7 @@ if (resultado) {
         <table>
           <tr>
             <th>Caja</th>
+            <th>Tipo</th>
             <th>Documento</th>
             <th>Nombre</th>
             <th>PDF</th>
@@ -227,12 +235,13 @@ if (resultado) {
         </table>
       `;
     } else {
-    // resultado = [caja_id, caja_num, documento, nombre, pdf_path]
+    // resultado = [caja_id, caja_num, tipo_doc, documento, nombre, pdf_path]
     BUSQ.cajaId = resultado[0];
     BUSQ.cajaNum = resultado[1];
-    BUSQ.doc = resultado[2];
-    BUSQ.nombre = resultado[3];
-    BUSQ.pdf = resultado.length > 4 ? resultado[4] : null;
+    BUSQ.tipoDoc = resultado[2];
+    BUSQ.doc = resultado[3];
+    BUSQ.nombre = resultado[4];
+    BUSQ.pdf = resultado.length > 5 ? resultado[5] : null;
 
     const cajaTxt =
       BUSQ.cajaNum === 0
@@ -252,6 +261,7 @@ if (resultado) {
       <table>
         <tr>
           <th>Caja</th>
+          <th>Tipo</th>
           <th>Documento</th>
           <th>Nombre</th>
           <th>PDF</th>
@@ -259,13 +269,14 @@ if (resultado) {
         </tr>
         <tr>
           <td>${cajaTxt}</td>
+          <td>${BUSQ.tipoDoc || ""}</td>
           <td>${formatMiles(BUSQ.doc)}</td>
           <td>${String(BUSQ.nombre || "").toUpperCase()}</td>
           <td>${BUSQ.pdf ? "Sí" : "No"}</td>
           <td>
             <div class="acciones-cell">
               <button type="button" class="btn-small"
-                      onclick="abrirModalEditarDesdeBusqueda(BUSQ.doc, BUSQ.nombre, BUSQ.cajaNum, BUSQ.cajaId)">
+                      onclick="abrirModalEditarDesdeBusqueda(BUSQ.doc, BUSQ.nombre, BUSQ.cajaNum, BUSQ.cajaId, BUSQ.tipoDoc)">
                 ✏️ Modificar
               </button>
 
@@ -295,6 +306,7 @@ if (resultado) {
       btnMod.removeAttribute("onclick");
       btnMod.dataset.doc = BUSQ.doc;
       btnMod.dataset.nombre = BUSQ.nombre || "";
+      btnMod.dataset.tipoDoc = BUSQ.tipoDoc || "";
       btnMod.dataset.cajaNum = BUSQ.cajaNum;
       btnMod.dataset.cajaId = BUSQ.cajaId;
     }

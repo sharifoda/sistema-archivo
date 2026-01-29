@@ -2499,6 +2499,13 @@ def archivo_duplicados():
         if ra != rb:
             parent[rb] = ra
 
+    def doc_sim(a, b):
+        sa = str(a) if a is not None else ""
+        sb = str(b) if b is not None else ""
+        if not sa or not sb:
+            return 0.0
+        return SequenceMatcher(None, sa, sb).ratio()
+
     for pref, lst in buckets.items():
         n = len(lst)
         for i in range(n):
@@ -2508,7 +2515,7 @@ def archivo_duplicados():
                 if abs(len(name_i) - len(name_j)) > 4:
                     continue
                 ratio = SequenceMatcher(None, name_i, name_j).ratio()
-                if ratio >= 0.88:
+                if ratio >= 0.88 and doc_sim(lst[i]["numero"], lst[j]["numero"]) >= 0.75:
                     union(lst[i]["id"], lst[j]["id"])
 
     grupos_nombre = defaultdict(list)

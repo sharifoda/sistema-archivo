@@ -76,6 +76,9 @@
       <button class="btn" type="button" onclick="abrirUnificar({{ loop.index }})">
         Unificar seleccionados
       </button>
+      <button class="btn" type="button" onclick="limpiarSeleccion({{ loop.index }})">
+        Dejar separados
+      </button>
       <span class="muted">Selecciona 2 o más registros para unificar.</span>
     </div>
   </div>
@@ -171,6 +174,12 @@
   function cerrarUnificar(){
     document.getElementById("overlayUnificar").style.display = "none";
     document.getElementById("modalUnificar").style.display = "none";
+  }
+
+  function limpiarSeleccion(groupIndex){
+    const group = document.querySelector(`.dup-group[data-group="${groupIndex}"]`);
+    const checks = group.querySelectorAll(".dup-check");
+    checks.forEach(chk => { chk.checked = false; });
   }
 
   document.addEventListener("click", function(e){

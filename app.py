@@ -36,6 +36,7 @@ from io import BytesIO
 from datetime import datetime
 import json
 from collections import defaultdict
+from difflib import SequenceMatcher
 from openpyxl.styles import Font
 from flask import flash
 import threading
@@ -77,6 +78,16 @@ app.jinja_env.globals["csrf_token"] = csrf_token
 
 def normalizar_nombre(nombre):
     return nombre.upper() if nombre else nombre
+
+def normalizar_nombre_clave(nombre):
+    if not nombre:
+        return ""
+    limpio = []
+    for ch in str(nombre).upper().strip():
+        if ch.isalnum() or ch.isspace():
+            limpio.append(ch)
+    base = "".join(limpio)
+    return " ".join(base.split())
 
 TIPO_DOC_OPCIONES = ("CC", "CE", "TI", "RC")
 
@@ -2328,6 +2339,194 @@ def archivo_caja(caja_id):
         caja=caja_info,
         archivos=archivos,
         highlight_num=highlight_num
+    )
+
+
+# ---------------- ARCHIVO: DUPLICADOS ----------------
+@app.route("/archivo/duplicados", methods=["GET", "POST"])
+def archivo_duplicados():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    if request.method == "POST":
+        accion = request.form.get("accion")
+        if accion == "unificar":
+            ids_raw = request.form.get("ids", "")
+            base_id_raw = request.form.get("base_id", "")
+            tipo_doc = normalizar_tipo_doc(request.form.get("tipo_doc", ""))
+            numero_raw = request.form.get("numero", "").strip()
+            nombre = request.form.get("nombre", "").strip()
+
+            if not ids_raw:
+                flash("No seleccionaste registros.", "error")
+                return redirect(url_for("archivo_duplicados"))
+
+            ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
+            if len(ids) < 2:
+                flash("Debes seleccionar al menos 2 registros.", "error")
+                return redirect(url_for("archivo_duplicados"))
+
+            if not base_id_raw or not base_id_raw.isdigit():
+                flash("Selecciona el registro base.", "error")
+                return redirect(url_for("archivo_duplicados"))
+
+            base_id = int(base_id_raw)
+            if base_id not in ids:
+                flash("El registro base debe estar dentro de la selección.", "error")
+                return redirect(url_for("archivo_duplicados"))
+
+            if not es_tipo_doc_valido(tipo_doc):
+                flash("Tipo de documento invalido.", "error")
+                return redirect(url_for("archivo_duplicados"))
+
+            if not numero_raw.isdigit():
+                flash("Documento invalido.", "error")
+                return redirect(url_for("archivo_duplicados"))
+
+            if not nombre:
+                flash("El nombre es obligatorio.", "error")
+                return redirect(url_for("archivo_duplicados"))
+
+            numero = int(numero_raw)
+            nombre = normalizar_nombre(nombre)
+
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT id FROM archivos WHERE id = ANY(%s) AND grupo_id = %s",
+                    (ids, grupo_id)
+                )
+                rows = [r[0] for r in cur.fetchall()]
+                if len(rows) != len(ids):
+                    flash("Seleccion invalida.", "error")
+                    return redirect(url_for("archivo_duplicados"))
+
+                otros = [i for i in ids if i != base_id]
+                if otros:
+                    cur.execute(
+                        "DELETE FROM archivos WHERE id = ANY(%s) AND grupo_id = %s",
+                        (otros, grupo_id)
+                    )
+
+                cur.execute(
+                    """
+                    UPDATE archivos
+                    SET tipo_doc = %s, numero = %s, nombre = %s
+                    WHERE id = %s AND grupo_id = %s
+                    """,
+                    (tipo_doc, numero, nombre, base_id, grupo_id)
+                )
+
+                conn.commit()
+                flash("Registros unificados correctamente.", "success")
+            except Exception:
+                conn.rollback()
+                app.logger.exception("Error unificando duplicados")
+                flash("Error al unificar duplicados.", "error")
+            finally:
+                cur.close()
+                conn.close()
+
+            return redirect(url_for("archivo_duplicados"))
+
+    # ======= GET: detectar duplicados =======
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, tipo_doc, numero, nombre
+        FROM archivos
+        WHERE grupo_id = %s
+        ORDER BY numero, id
+        """,
+        (grupo_id,)
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    items = [
+        {
+            "id": r[0],
+            "tipo_doc": r[1],
+            "numero": r[2],
+            "nombre": r[3] or ""
+        }
+        for r in rows
+    ]
+
+    grupos = []
+    usados = set()
+
+    # --- 1) Duplicados por numero (sin importar tipo_doc)
+    por_numero = defaultdict(list)
+    for it in items:
+        por_numero[it["numero"]].append(it)
+    for numero, lst in por_numero.items():
+        if len(lst) > 1:
+            grupos.append({
+                "tipo": "numero",
+                "clave": str(numero),
+                "items": lst
+            })
+            usados.update([x["id"] for x in lst])
+
+    # --- 2) Duplicados por nombre similar
+    candidatos = [it for it in items if it["id"] not in usados and it["nombre"]]
+    # bucket por prefijo para limitar comparaciones
+    buckets = defaultdict(list)
+    for it in candidatos:
+        key = normalizar_nombre_clave(it["nombre"]).replace(" ", "")
+        pref = key[:3] if len(key) >= 3 else key
+        buckets[pref].append(it)
+
+    # Union-Find simple
+    parent = {it["id"]: it["id"] for it in candidatos}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for pref, lst in buckets.items():
+        n = len(lst)
+        for i in range(n):
+            name_i = normalizar_nombre_clave(lst[i]["nombre"])
+            for j in range(i + 1, n):
+                name_j = normalizar_nombre_clave(lst[j]["nombre"])
+                if abs(len(name_i) - len(name_j)) > 4:
+                    continue
+                ratio = SequenceMatcher(None, name_i, name_j).ratio()
+                if ratio >= 0.88:
+                    union(lst[i]["id"], lst[j]["id"])
+
+    grupos_nombre = defaultdict(list)
+    for it in candidatos:
+        grupos_nombre[find(it["id"])].append(it)
+
+    for _, lst in grupos_nombre.items():
+        if len(lst) > 1:
+            grupos.append({
+                "tipo": "nombre",
+                "clave": normalizar_nombre_clave(lst[0]["nombre"]),
+                "items": lst
+            })
+
+    return render_template(
+        "archivo_duplicados.html",
+        grupos=grupos,
+        tipo_doc_opciones=TIPO_DOC_OPCIONES
     )
 
 

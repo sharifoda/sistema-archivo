@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .dup-header{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px;
+  }
+  .dup-group{
+    border:2px solid #000; border-radius:10px; padding:12px; margin-bottom:16px; background:#fff;
+  }
+  .dup-group h4{ margin:0 0 10px; }
+  .dup-table{ width:100%; border-collapse:collapse; }
+  .dup-table th, .dup-table td{ border:1px solid #000; padding:8px; }
+  .dup-actions{ margin-top:10px; display:flex; gap:10px; align-items:center; }
+  .btn{
+    padding:8px 12px; border:2px solid #000; background:#fff; cursor:pointer; border-radius:8px;
+  }
+  .btn-disabled{ opacity:.6; cursor:not-allowed; }
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
+  }
+  .modal{
+    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(720px,92vw); background:#fff; border-radius:12px; padding:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:1000;
+  }
+  .modal .actions{ display:flex; justify-content:space-between; margin-top:12px; }
+  .modal input, .modal select{
+    width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
+  }
+  .radio-list{ display:grid; gap:8px; margin-top:10px; }
+  .muted{ color:#666; font-size:13px; }
+</style>
+
+<div class="dup-header">
+  <h2>Duplicados</h2>
+  <a class="btn" href="{{ url_for('archivo') }}">⬅️ Volver a Archivo</a>
+</div>
+
+{% if grupos and grupos|length > 0 %}
+  {% for g in grupos %}
+  <div class="dup-group" data-group="{{ loop.index }}">
+    <h4>
+      {% if g.tipo == "numero" %}
+        Duplicados por documento: {{ g.clave }}
+      {% else %}
+        Duplicados por nombre similar
+      {% endif %}
+    </h4>
+    <table class="dup-table">
+      <tr>
+        <th>Sel</th>
+        <th>ID</th>
+        <th>Tipo</th>
+        <th>Documento</th>
+        <th>Nombre</th>
+      </tr>
+      {% for it in g.items %}
+      <tr>
+        <td>
+          <input type="checkbox"
+                 class="dup-check"
+                 data-id="{{ it.id }}"
+                 data-tipo="{{ it.tipo_doc }}"
+                 data-numero="{{ it.numero }}"
+                 data-nombre="{{ it.nombre }}">
+        </td>
+        <td>{{ it.id }}</td>
+        <td>{{ it.tipo_doc }}</td>
+        <td>{{ it.numero|puntos }}</td>
+        <td>{{ it.nombre|upper }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="dup-actions">
+      <button class="btn" type="button" onclick="abrirUnificar({{ loop.index }})">
+        Unificar seleccionados
+      </button>
+      <span class="muted">Selecciona 2 o más registros para unificar.</span>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <p>No se encontraron duplicados.</p>
+{% endif %}
+
+<!-- Modal Unificar -->
+<div class="modal-overlay" id="overlayUnificar"></div>
+<div class="modal" id="modalUnificar">
+  <h3>Unificar duplicados</h3>
+  <p class="muted">Selecciona el registro base o edita los datos finales.</p>
+
+  <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+    <input type="hidden" name="accion" value="unificar">
+    <input type="hidden" name="ids" id="unificar_ids">
+
+    <div id="radioList" class="radio-list"></div>
+
+    <label>Tipo de documento final</label>
+    <select name="tipo_doc" id="tipo_doc_final" required>
+      <option value="">Selecciona</option>
+      {% for t in tipo_doc_opciones %}
+      <option value="{{ t }}">{{ t }}</option>
+      {% endfor %}
+    </select>
+
+    <label>Documento final</label>
+    <input type="number" name="numero" id="numero_final" required>
+
+    <label>Nombre final</label>
+    <input type="text" name="nombre" id="nombre_final" required>
+
+    <input type="hidden" name="base_id" id="base_id">
+
+    <div class="actions">
+      <button type="button" class="btn" onclick="cerrarUnificar()">Cancelar</button>
+      <button type="submit" class="btn">Unificar</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  function abrirUnificar(groupIndex){
+    const group = document.querySelector(`.dup-group[data-group="${groupIndex}"]`);
+    const checks = group.querySelectorAll(".dup-check:checked");
+    if (checks.length < 2) {
+      alert("Selecciona al menos 2 registros.");
+      return;
+    }
+
+    const radioList = document.getElementById("radioList");
+    radioList.innerHTML = "";
+    const ids = [];
+
+    checks.forEach((chk, idx) => {
+      const id = chk.dataset.id;
+      const tipo = chk.dataset.tipo;
+      const numero = chk.dataset.numero;
+      const nombre = chk.dataset.nombre;
+      ids.push(id);
+
+      const row = document.createElement("label");
+      row.style.display = "flex";
+      row.style.gap = "8px";
+      row.style.alignItems = "center";
+      row.innerHTML = `
+        <input type="radio" name="base_id_radio" value="${id}" ${idx === 0 ? "checked" : ""}>
+        <span>${tipo} ${numero} - ${nombre}</span>
+      `;
+      row.querySelector("input").addEventListener("change", () => {
+        document.getElementById("base_id").value = id;
+        document.getElementById("tipo_doc_final").value = tipo;
+        document.getElementById("numero_final").value = numero;
+        document.getElementById("nombre_final").value = nombre;
+      });
+      radioList.appendChild(row);
+    });
+
+    const first = checks[0];
+    document.getElementById("base_id").value = first.dataset.id;
+    document.getElementById("tipo_doc_final").value = first.dataset.tipo;
+    document.getElementById("numero_final").value = first.dataset.numero;
+    document.getElementById("nombre_final").value = first.dataset.nombre;
+    document.getElementById("unificar_ids").value = ids.join(",");
+
+    document.getElementById("overlayUnificar").style.display = "block";
+    document.getElementById("modalUnificar").style.display = "block";
+  }
+
+  function cerrarUnificar(){
+    document.getElementById("overlayUnificar").style.display = "none";
+    document.getElementById("modalUnificar").style.display = "none";
+  }
+
+  document.addEventListener("click", function(e){
+    if (e.target === document.getElementById("overlayUnificar")) cerrarUnificar();
+  });
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape") cerrarUnificar();
+  });
+</script>
+
+{% endblock %}

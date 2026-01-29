@@ -102,7 +102,10 @@
   </div>
 
   <div class="right">
-    <button class="btn" type="button" onclick="abrirModal('Doc')">Agregar Documento</button>
+    <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+      <a class="btn" href="{{ url_for('archivo_duplicados') }}">Duplicados</a>
+      <button class="btn" type="button" onclick="abrirModal('Doc')">Agregar Documento</button>
+    </div>
   </div>
 </div>
 

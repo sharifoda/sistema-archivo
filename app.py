@@ -1506,16 +1506,16 @@ def archivo():
             return redirect(url_for("archivo"))
 
         # ---------- Agregar Documento ----------
-      elif accion == "agregar_documento":
-          numero = int(request.form["numero"])
-          tipo_doc = normalizar_tipo_doc(request.form.get("tipo_doc", ""))
-          if not es_tipo_doc_valido(tipo_doc):
-              flash("Tipo de documento invalido.", "error")
-              return redirect(url_for("archivo"))
-          nombre = request.form.get("nombre", "").strip()
-          if not nombre:
-              nombre = f"Documento {numero}"
-          nombre = normalizar_nombre(nombre)
+        elif accion == "agregar_documento":
+            numero = int(request.form["numero"])
+            tipo_doc = normalizar_tipo_doc(request.form.get("tipo_doc", ""))
+            if not es_tipo_doc_valido(tipo_doc):
+                flash("Tipo de documento invalido.", "error")
+                return redirect(url_for("archivo"))
+            nombre = request.form.get("nombre", "").strip()
+            if not nombre:
+                nombre = f"Documento {numero}"
+            nombre = normalizar_nombre(nombre)
 
             conn = get_db()
             cur = conn.cursor()
@@ -1531,11 +1531,10 @@ def archivo():
                 LIMIT 1
             """, (grupo_id, numero))
             caja_dest = cur.fetchone()
-            caja_id = caja_dest[0] if caja_dest else asegurar_caja_sin_asignar(grupo_id)  # âœ… si no cae en ninguna caja â†’ 0
+            caja_id = caja_dest[0] if caja_dest else asegurar_caja_sin_asignar(grupo_id)  # si no cae en ninguna caja → 0
 
             # 2) Insertar archivo YA con caja_id
-            # (si tu tabla tiene otras columnas obligatorias, aquÃ­ se ajusta, pero esto es lo normal)
-          cur.execute("""
+            cur.execute("""
                 INSERT INTO archivos (caja_id, numero, nombre, pdf_path, grupo_id, creado_por, tipo_doc)
                 VALUES (%s, %s, %s, NULL, %s, %s, %s)
                 RETURNING id

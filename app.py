@@ -167,6 +167,141 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
     max_row = ws.max_row or 1
     max_col = ws.max_column or 1
 
+    headers = []
+    for col in range(1, max_col + 1):
+        val = ws.cell(row=1, column=col).value
+        headers.append(str(val).strip().lower() if val is not None else "")
+
+    def _clean_num(value):
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            try:
+                return int(value)
+            except Exception:
+                return None
+        s = str(value).strip()
+        if not s:
+            return None
+        s = s.replace(".", "")
+        if not s.isdigit():
+            return None
+        return int(s)
+
+    def _clean_text(value):
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _build_nombre(parts):
+        return " ".join([p for p in parts if p])
+
+    # ===== Formato nuevo (filas con tipo_doc + documento + nombres/apellidos)
+    if "tipo_doc" in headers and "documento" in headers:
+        tipo_idx = headers.index("tipo_doc") + 1
+        doc_idx = headers.index("documento") + 1
+        pri_nom_idx = headers.index("pri_nom") + 1 if "pri_nom" in headers else None
+        seg_nom_idx = headers.index("seg_nom") + 1 if "seg_nom" in headers else None
+        pri_ap_idx = headers.index("pri_apelli") + 1 if "pri_apelli" in headers else None
+        seg_ap_idx = headers.index("seg_apelli") + 1 if "seg_apelli" in headers else None
+
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT id, rango_min, rango_max
+                FROM cajas
+                WHERE grupo_id = %s AND is_pendiente = FALSE
+                ORDER BY rango_min, id
+                """,
+                (grupo_id,)
+            )
+            cajas_rangos = cur.fetchall()
+            caja_pendiente_id = asegurar_caja_sin_asignar(grupo_id)
+
+            values = []
+            for row in range(2, max_row + 1):
+                tipo_doc = normalizar_tipo_doc(ws.cell(row=row, column=tipo_idx).value)
+                if not es_tipo_doc_valido(tipo_doc):
+                    continue
+                numero = _clean_num(ws.cell(row=row, column=doc_idx).value)
+                if not numero:
+                    continue
+
+                parts = []
+                if pri_nom_idx:
+                    parts.append(_clean_text(ws.cell(row=row, column=pri_nom_idx).value))
+                if seg_nom_idx:
+                    parts.append(_clean_text(ws.cell(row=row, column=seg_nom_idx).value))
+                if pri_ap_idx:
+                    parts.append(_clean_text(ws.cell(row=row, column=pri_ap_idx).value))
+                if seg_ap_idx:
+                    parts.append(_clean_text(ws.cell(row=row, column=seg_ap_idx).value))
+
+                nombre = _build_nombre(parts)
+                if not nombre:
+                    nombre = f"Documento {numero}"
+                nombre = normalizar_nombre(nombre)
+
+                caja_id = caja_pendiente_id
+                for cid, rmin, rmax in cajas_rangos:
+                    if rmin is not None and rmax is not None and rmin <= numero <= rmax:
+                        caja_id = cid
+                        break
+
+                values.append((caja_id, numero, nombre, grupo_id, usuario_id, tipo_doc))
+
+            if not values:
+                app.logger.warning("Importacion Excel: sin filas validas")
+                return
+
+            sql = """
+                INSERT INTO archivos (caja_id, numero, nombre, grupo_id, creado_por, tipo_doc)
+                VALUES %s
+                ON CONFLICT (grupo_id, numero) DO NOTHING
+                RETURNING id, numero, nombre, caja_id, tipo_doc
+            """
+            execute_values(cur, sql, values, page_size=1000)
+            rows = cur.fetchall()
+
+            if rows:
+                mov_values = [
+                    (
+                        usuario_id,
+                        grupo_id,
+                        "archivo",
+                        r[0],
+                        "CREAR_ARCHIVO",
+                        None,
+                        Json({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
+                        None,
+                    )
+                    for r in rows
+                ]
+                mov_sql = """
+                    INSERT INTO movimientos (
+                        usuario_id, grupo_id, entidad, entidad_id, accion,
+                        datos_antes, datos_despues, meta
+                    )
+                    VALUES %s
+                """
+                execute_values(cur, mov_sql, mov_values, page_size=1000)
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            app.logger.exception("Error importando Excel (formato filas)")
+        finally:
+            cur.close()
+            conn.close()
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        return
+
+    # ===== Formato anterior (cajas por columna)
     columnas = []
     for col in range(1, max_col + 1):
         header = ws.cell(row=1, column=col).value
@@ -175,18 +310,9 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
         numeros = []
         for row in range(2, max_row + 1):
             cell_val = ws.cell(row=row, column=col).value
-            if cell_val is None:
+            num = _clean_num(cell_val)
+            if not num:
                 continue
-            if isinstance(cell_val, (int, float)):
-                try:
-                    num = int(cell_val)
-                except Exception:
-                    continue
-            else:
-                s = str(cell_val).strip()
-                if not s.isdigit():
-                    continue
-                num = int(s)
             numeros.append(num)
         columnas.append((col, str(header).strip(), numeros))
 

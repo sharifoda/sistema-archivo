@@ -85,6 +85,41 @@
 {% block content %}
 {% endblock %}
 
+<!-- ===== PDF Collage Modal ===== -->
+<div id="pdfModalOverlay" class="pdf-modal-overlay"></div>
+<div id="pdfModal" class="pdf-modal">
+  <div class="pdf-modal-header">
+    <div>
+      <strong id="pdfModalTitle">PDF</strong>
+      <div class="pdf-modal-sub" id="pdfModalSub"></div>
+    </div>
+    <button type="button" class="btn" onclick="cerrarPdfModal()">Cerrar</button>
+  </div>
+
+  <div class="pdf-modal-body">
+    <div class="pdf-thumbs" id="pdfThumbs"></div>
+    <div class="pdf-preview">
+      <canvas id="pdfPreviewCanvas"></canvas>
+    </div>
+  </div>
+
+  <div class="pdf-modal-footer">
+    <div class="pdf-actions" id="pdfSelectedActions">
+      <button type="button" class="btn" onclick="abrirSeleccionadas()">Ver seleccionadas</button>
+      <button type="button" class="btn" onclick="descargarSeleccionadas()">Descargar seleccionadas</button>
+    </div>
+    <button type="button" class="btn" onclick="abrirPdfCompleto()">Ver PDF completo</button>
+  </div>
+</div>
+
+<div id="pdf-modal-data"
+     data-url-base="{{ url_for('ver_pdf', numero=0) }}"
+     data-url-pages="{{ url_for('ver_pdf_paginas', numero=0) }}">
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="{{ url_for('static', filename='pdf_modal.js') }}"></script>
+
 </body>
 </html>
 

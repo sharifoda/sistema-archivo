@@ -106,7 +106,12 @@
       </form>
 
       {% if a|length > 3 and a[3] %}
-        <a class="btn" href="{{ url_for('ver_pdf', numero=a[0]) }}" target="_blank" rel="noopener">Ver PDF</a>
+        <button class="btn" type="button"
+                data-numero="{{ a[0] }}"
+                data-nombre="{{ a[2] }}"
+                onclick="abrirPdfModal(this)">
+          Ver PDF
+        </button>
       {% else %}
         <button class="btn btn-disabled" type="button" disabled title="Este documento no tiene PDF">
           Ver PDF

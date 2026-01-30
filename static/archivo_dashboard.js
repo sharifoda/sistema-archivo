@@ -174,7 +174,9 @@ if (resultado) {
             cajaNum === 0 ? "<strong>0</strong> (Pendiente)" : cajaNum;
           const irCajaUrl = buildCajaUrl(cajaId, doc);
           const pdfLink = pdf
-            ? `<a class="btn-small" href="${buildPdfUrl(doc)}" target="_blank" rel="noopener">Ver PDF</a>`
+            ? `<button type="button" class="btn-small"
+                 data-numero="${doc}" data-nombre="${nombreAttr}"
+                 onclick="abrirPdfModal(this)">Ver PDF</button>`
             : `<button type="button" class="btn-small btn-disabled"
                  onclick="alert('Este documento no tiene PDF.');">
                  Ver PDF
@@ -251,7 +253,7 @@ if (resultado) {
     const irCajaUrl = buildCajaUrl(BUSQ.cajaId, BUSQ.doc);
 
     const pdfLink = BUSQ.pdf
-      ? `<a class="btn-small" href="${buildPdfUrl(BUSQ.doc)}" target="_blank" rel="noopener">📄 Ver PDF</a>`
+      ? `<button type="button" class="btn-small" data-numero="${BUSQ.doc}" data-nombre="${escapeAttr(BUSQ.nombre || "")}" onclick="abrirPdfModal(this)">📄 Ver PDF</button>`
       : `<button type="button" class="btn-small btn-disabled"
            onclick="alert('Este documento no tiene PDF.');">
            📄 Ver PDF
@@ -323,3 +325,5 @@ if (resultado) {
 
   abrirModal("Buscar");
 }
+
+

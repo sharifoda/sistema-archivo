@@ -41,6 +41,12 @@ from openpyxl.styles import Font
 from flask import flash
 import threading
 import uuid
+import re
+try:
+    from PyPDF2 import PdfReader, PdfWriter
+except Exception:
+    PdfReader = None
+    PdfWriter = None
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -3189,6 +3195,70 @@ def ver_pdf(numero):
 
     filename = row[0]
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=False)
+
+
+@app.route("/pdf/<int:numero>/pages")
+def ver_pdf_paginas(numero):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    pages_raw = request.args.get("pages", "")
+    download = request.args.get("download") == "1"
+    pages = []
+    for p in pages_raw.split(","):
+        p = p.strip()
+        if p.isdigit():
+            pages.append(int(p) - 1)
+
+    if not pages:
+        return "No hay paginas seleccionadas.", 400
+
+    if PdfReader is None or PdfWriter is None:
+        return "No se pudo procesar el PDF seleccionado.", 500
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+        (numero, grupo_id)
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row or not row[0]:
+        return "No hay PDF para este documento.", 404
+
+    filename = row[0]
+    path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    if not os.path.exists(path):
+        return "No hay PDF para este documento.", 404
+
+    try:
+        reader = PdfReader(path)
+        writer = PdfWriter()
+        total = len(reader.pages)
+        for idx in pages:
+            if 0 <= idx < total:
+                writer.add_page(reader.pages[idx])
+    except Exception:
+        app.logger.exception("Error creando PDF seleccionado")
+        return "No se pudo procesar el PDF seleccionado.", 500
+
+    output = BytesIO()
+    writer.write(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=download,
+        download_name=f"doc_{numero}_seleccion.pdf",
+        mimetype="application/pdf"
+    )
 
 if __name__ == "__main__":
     app.run(debug=False)

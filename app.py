@@ -2486,6 +2486,7 @@ def archivo_duplicados():
             conn = get_db()
             cur = conn.cursor()
             try:
+                cur.execute("SET LOCAL statement_timeout = 5000")
                 cur.execute(
                     """
                     SELECT a.id, b.id
@@ -2494,7 +2495,18 @@ def archivo_duplicados():
                       ON a.grupo_id = b.grupo_id
                      AND a.id < b.id
                     WHERE a.grupo_id = %s
+                      AND a.id = ANY(%s)
+                      AND b.id = ANY(%s)
                       AND a.nombre <> '' AND b.nombre <> ''
+                      AND left(
+                        regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'), 3
+                      ) = left(
+                        regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g'), 3
+                      )
+                      AND abs(
+                        length(regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g')) -
+                        length(regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g'))
+                      ) <= 4
                       AND similarity(
                             regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
                             regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
@@ -2502,7 +2514,7 @@ def archivo_duplicados():
                       AND similarity(a.numero::text, b.numero::text) >= 0.75
                     LIMIT 2000
                     """,
-                    (grupo_id,)
+                    (grupo_id, candidatos_ids, candidatos_ids)
                 )
                 pairs = cur.fetchall()
             except Exception:

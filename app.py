@@ -2484,50 +2484,32 @@ def archivo_duplicados():
         conn = get_db()
         cur = conn.cursor()
         try:
-            if usados:
-                cur.execute(
-                    """
-                    SELECT a.id, b.id
-                    FROM archivos a
-                    JOIN archivos b
-                      ON a.grupo_id = b.grupo_id
-                     AND a.id < b.id
-                    WHERE a.grupo_id = %s
-                      AND a.nombre <> '' AND b.nombre <> ''
-                      AND similarity(
-                            regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
-                            regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
-                          ) >= 0.85
-                      AND similarity(a.numero::text, b.numero::text) >= 0.75
-                      AND a.id <> ALL(%s)
-                      AND b.id <> ALL(%s)
-                    """,
-                    (grupo_id, list(usados), list(usados))
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT a.id, b.id
-                    FROM archivos a
-                    JOIN archivos b
-                      ON a.grupo_id = b.grupo_id
-                     AND a.id < b.id
-                    WHERE a.grupo_id = %s
-                      AND a.nombre <> '' AND b.nombre <> ''
-                      AND similarity(
-                            regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
-                            regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
-                          ) >= 0.85
-                      AND similarity(a.numero::text, b.numero::text) >= 0.75
-                    """,
-                    (grupo_id,)
-                )
+            cur.execute(
+                """
+                SELECT a.id, b.id
+                FROM archivos a
+                JOIN archivos b
+                  ON a.grupo_id = b.grupo_id
+                 AND a.id < b.id
+                WHERE a.grupo_id = %s
+                  AND a.nombre <> '' AND b.nombre <> ''
+                  AND similarity(
+                        regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
+                        regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
+                      ) >= 0.85
+                  AND similarity(a.numero::text, b.numero::text) >= 0.75
+                """,
+                (grupo_id,)
+            )
             pairs = cur.fetchall()
         except Exception:
             app.logger.exception("Error buscando duplicados por nombre")
         finally:
             cur.close()
             conn.close()
+        if usados and pairs:
+            usados_set = set(usados)
+            pairs = [(a_id, b_id) for (a_id, b_id) in pairs if a_id not in usados_set and b_id not in usados_set]
 
     # Union-Find simple
     parent = {}

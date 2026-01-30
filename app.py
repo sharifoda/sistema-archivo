@@ -40,6 +40,8 @@ from openpyxl.styles import Font
 from flask import flash
 import threading
 import uuid
+import difflib
+import re
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2476,40 +2478,34 @@ def archivo_duplicados():
             })
             usados.update([x["id"] for x in lst])
 
-    # --- 2) Duplicados por nombre similar (Postgres pg_trgm)
-    # Se ejecuta solo si el usuario lo solicita para evitar timeouts.
+    # --- 2) Duplicados por nombre similar (sin pg_trgm; puede ser lento)
     pairs = []
     analizar_nombres = request.args.get("nombre") == "1"
     if analizar_nombres:
-        conn = get_db()
-        cur = conn.cursor()
-        try:
-            cur.execute(
-                """
-                SELECT a.id, b.id
-                FROM archivos a
-                JOIN archivos b
-                  ON a.grupo_id = b.grupo_id
-                 AND a.id < b.id
-                WHERE a.grupo_id = %s
-                  AND a.nombre <> '' AND b.nombre <> ''
-                  AND similarity(
-                        regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
-                        regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
-                      ) >= 0.85
-                  AND similarity(a.numero::text, b.numero::text) >= 0.75
-                """,
-                (grupo_id,)
-            )
-            pairs = cur.fetchall()
-        except Exception:
-            app.logger.exception("Error buscando duplicados por nombre")
-        finally:
-            cur.close()
-            conn.close()
-        if usados and pairs:
-            usados_set = set(usados)
-            pairs = [(a_id, b_id) for (a_id, b_id) in pairs if a_id not in usados_set and b_id not in usados_set]
+        def normalizar_nombre_py(nombre):
+            nombre = (nombre or "").upper()
+            nombre = re.sub(r"[^A-Z0-9 ]", "", nombre)
+            nombre = re.sub(r"\s+", " ", nombre).strip()
+            return nombre
+
+        def normalizar_num_py(numero):
+            return re.sub(r"\D", "", str(numero or ""))
+
+        candidatos = [it for it in items if it["id"] not in usados and it["nombre"]]
+        for i in range(len(candidatos)):
+            a = candidatos[i]
+            a_nombre = normalizar_nombre_py(a["nombre"])
+            a_num = normalizar_num_py(a["numero"])
+            for j in range(i + 1, len(candidatos)):
+                b = candidatos[j]
+                b_nombre = normalizar_nombre_py(b["nombre"])
+                b_num = normalizar_num_py(b["numero"])
+                if not a_nombre or not b_nombre or not a_num or not b_num:
+                    continue
+                sim_nom = difflib.SequenceMatcher(None, a_nombre, b_nombre).ratio()
+                sim_num = difflib.SequenceMatcher(None, a_num, b_num).ratio()
+                if sim_nom >= 0.85 and sim_num >= 0.75:
+                    pairs.append((a["id"], b["id"]))
 
     # Union-Find simple
     parent = {}

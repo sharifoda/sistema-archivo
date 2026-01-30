@@ -109,6 +109,14 @@
         <button class="btn" type="button"
                 data-numero="{{ a[0] }}"
                 data-nombre="{{ a[2] }}"
+                data-tipo="{{ a[1] }}"
+                data-append="1"
+                onclick="abrirModalArchivo(this)">
+          Añadir PDF
+        </button>
+        <button class="btn" type="button"
+                data-numero="{{ a[0] }}"
+                data-nombre="{{ a[2] }}"
                 onclick="abrirPdfModal(this)">
           Ver PDF
         </button>
@@ -203,6 +211,11 @@
     <label>PDF (opcional)</label>
     <input type="file" name="pdf" accept="application/pdf">
 
+    <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+      <input type="checkbox" name="append_pdf" id="append_pdf" value="1">
+      Añadir PDF (unir con el actual)
+    </label>
+
     <!-- 🗑️ NUEVO: eliminar PDF -->
     <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
       <input type="checkbox" name="remove_pdf" value="1">
@@ -240,11 +253,20 @@
     const numero = btn.getAttribute("data-numero");
     const nombre = btn.getAttribute("data-nombre") || "";
     const tipo = btn.getAttribute("data-tipo") || "";
+    const append = btn.getAttribute("data-append") === "1";
 
     document.getElementById("numero_old").value = numero;
     document.getElementById("numero_new").value = numero;
     document.getElementById("nombre_new").value = nombre;
     document.getElementById("tipo_doc_new").value = tipo;
+    const appendInput = document.getElementById("append_pdf");
+    if (appendInput) {
+      appendInput.checked = append;
+    }
+    const removeInput = document.querySelector("input[name='remove_pdf']");
+    if (removeInput) {
+      removeInput.checked = false;
+    }
 
     document.getElementById("overlayArchivo").style.display = "block";
     document.getElementById("modalArchivo").style.display = "block";

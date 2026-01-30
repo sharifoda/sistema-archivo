@@ -130,6 +130,39 @@ def guardar_pdf(file, numero_documento, grupo_id):
     return final_name
 
 
+def unir_pdf_existente(pdf_old, file, numero_documento, grupo_id):
+    """
+    Une el PDF existente con uno nuevo y guarda en el mismo archivo.
+    Retorna el path relativo final.
+    """
+    if not pdf_old:
+        return guardar_pdf(file, numero_documento, grupo_id)
+    if PdfReader is None or PdfWriter is None:
+        return None
+
+    path = pdf_old
+    if not os.path.isabs(path):
+        path = os.path.join(app.config["UPLOAD_FOLDER"], path)
+
+    if not os.path.exists(path):
+        return guardar_pdf(file, numero_documento, grupo_id)
+
+    try:
+        reader_old = PdfReader(path)
+        file.stream.seek(0)
+        reader_new = PdfReader(file.stream)
+        writer = PdfWriter()
+        for p in reader_old.pages:
+            writer.add_page(p)
+        for p in reader_new.pages:
+            writer.add_page(p)
+        with open(path, "wb") as f:
+            writer.write(f)
+        return pdf_old
+    except Exception:
+        return None
+
+
 def login_requerido():
     return "usuario" in session
 
@@ -1805,8 +1838,11 @@ def archivo():
                 flash("Tipo de documento invalido.", "error")
                 return redirect(url_for("archivo"))
 
-            # checkbox para eliminar PDF actual
+            # checkbox para eliminar PDF actual / agregar PDF
             remove_pdf = request.form.get("remove_pdf") == "1"
+            append_pdf = request.form.get("append_pdf") == "1"
+            if append_pdf:
+                remove_pdf = False
 
             conn = get_db()
             cur = conn.cursor()
@@ -1853,7 +1889,7 @@ def archivo():
 
                 pdf_name = None  # queda NULL en DB
 
-            # 2) subir PDF nuevo (reemplazo)
+            # 2) subir PDF nuevo (reemplazo o agregar)
             file = request.files.get("pdf")
             if file and file.filename:
                 if not es_pdf(file):
@@ -1862,18 +1898,26 @@ def archivo():
                     flash("El archivo debe ser PDF.", "error")
                     return redirect(url_for("archivo"))
 
-                # si habÃ­a anterior y no se eliminÃ³ arriba, lo borramos
-                if pdf_old and not remove_pdf:
-                    try:
-                        old_path = pdf_old
-                        if not os.path.isabs(old_path):
-                            old_path = os.path.join(app.root_path, old_path)
-                        if os.path.exists(old_path):
-                            os.remove(old_path)
-                    except Exception as e:
-                        print("Error eliminando PDF anterior:", e)
+                if append_pdf:
+                    pdf_name = unir_pdf_existente(pdf_old, file, numero_new, grupo_id)
+                    if not pdf_name:
+                        cur.close()
+                        conn.close()
+                        flash("No se pudo unir el PDF.", "error")
+                        return redirect(url_for("archivo"))
+                else:
+                    # si habÃ­a anterior y no se eliminÃ³ arriba, lo borramos
+                    if pdf_old and not remove_pdf:
+                        try:
+                            old_path = pdf_old
+                            if not os.path.isabs(old_path):
+                                old_path = os.path.join(app.root_path, old_path)
+                            if os.path.exists(old_path):
+                                os.remove(old_path)
+                        except Exception as e:
+                            print("Error eliminando PDF anterior:", e)
 
-                pdf_name = guardar_pdf(file, numero_new, grupo_id)
+                    pdf_name = guardar_pdf(file, numero_new, grupo_id)
 
             # 3) update final
             cur.execute("""
@@ -1890,7 +1934,7 @@ def archivo():
                 session.get("usuario_id"),
                 f"ARCHIVO|tipo=MODIFICACION|numero_old={numero_viejo}|numero_new={numero_new}|"
                 f"nombre_old={nombre_viejo}|nombre_new={nombre_new}|caja={caja_dest_id}|"
-                f"pdf_eliminado={1 if (remove_pdf and pdf_old) else 0}|pdf_nuevo={1 if (file and file.filename) else 0}",
+                f"pdf_eliminado={1 if (remove_pdf and pdf_old) else 0}|pdf_nuevo={1 if (file and file.filename) else 0}|pdf_unido={1 if append_pdf else 0}",
                 request.remote_addr,
                 grupo_id
             )
@@ -2201,6 +2245,9 @@ def archivo_caja(caja_id):
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             remove_pdf = request.form.get("remove_pdf") == "1"
+            append_pdf = request.form.get("append_pdf") == "1"
+            if append_pdf:
+                remove_pdf = False
             file = request.files.get("pdf")
 
             conn = get_db()
@@ -2235,7 +2282,7 @@ def archivo_caja(caja_id):
 
                 pdf_name = None
 
-            # ðŸ“„ Reemplazar / subir PDF nuevo
+            # ðŸ“„ Reemplazar / agregar PDF
             if file and file.filename:
                 if not es_pdf(file):
                     cur.close()
@@ -2243,18 +2290,26 @@ def archivo_caja(caja_id):
                     flash("El archivo debe ser PDF.", "error")
                     return redirect(url_for("archivo_caja", caja_id=caja_id))
 
-                # borrar anterior si existÃ­a
-                if pdf_old and not remove_pdf:
-                    try:
-                        old_path = pdf_old
-                        if not os.path.isabs(old_path):
-                            old_path = os.path.join(app.root_path, old_path)
-                        if os.path.exists(old_path):
-                            os.remove(old_path)
-                    except Exception as e:
-                        print("Error eliminando PDF anterior:", e)
+                if append_pdf:
+                    pdf_name = unir_pdf_existente(pdf_old, file, numero_new, grupo_id)
+                    if not pdf_name:
+                        cur.close()
+                        conn.close()
+                        flash("No se pudo unir el PDF.", "error")
+                        return redirect(url_for("archivo_caja", caja_id=caja_id))
+                else:
+                    # borrar anterior si existÃ­a
+                    if pdf_old and not remove_pdf:
+                        try:
+                            old_path = pdf_old
+                            if not os.path.isabs(old_path):
+                                old_path = os.path.join(app.root_path, old_path)
+                            if os.path.exists(old_path):
+                                os.remove(old_path)
+                        except Exception as e:
+                            print("Error eliminando PDF anterior:", e)
 
-                pdf_name = guardar_pdf(file, numero_new, grupo_id)
+                    pdf_name = guardar_pdf(file, numero_new, grupo_id)
 
             # Update final
             cur.execute("""

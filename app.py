@@ -2494,8 +2494,12 @@ def archivo_duplicados():
                      AND a.id < b.id
                     WHERE a.grupo_id = %s
                       AND a.nombre <> '' AND b.nombre <> ''
-                      AND a.nombre % b.nombre
-                      AND similarity(a.nombre, b.nombre) >= 0.88
+                      AND regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g')
+                          % regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
+                      AND similarity(
+                            regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
+                            regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
+                          ) >= 0.85
                       AND (a.numero::text % b.numero::text)
                       AND similarity(a.numero::text, b.numero::text) >= 0.75
                       AND a.id <> ALL(%s)
@@ -2513,8 +2517,12 @@ def archivo_duplicados():
                      AND a.id < b.id
                     WHERE a.grupo_id = %s
                       AND a.nombre <> '' AND b.nombre <> ''
-                      AND a.nombre % b.nombre
-                      AND similarity(a.nombre, b.nombre) >= 0.88
+                      AND regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g')
+                          % regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
+                      AND similarity(
+                            regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
+                            regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
+                          ) >= 0.85
                       AND (a.numero::text % b.numero::text)
                       AND similarity(a.numero::text, b.numero::text) >= 0.75
                     """,

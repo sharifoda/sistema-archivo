@@ -2477,39 +2477,42 @@ def archivo_duplicados():
             usados.update([x["id"] for x in lst])
 
     # --- 2) Duplicados por nombre similar (Postgres pg_trgm)
-    # Usamos similitud en nombre + similitud en numero (>= 0.75)
-    candidatos_ids = [it["id"] for it in items if it["id"] not in usados and it["nombre"]]
+    # Se ejecuta solo si el usuario lo solicita para evitar timeouts.
     pairs = []
-    if candidatos_ids:
-        conn = get_db()
-        cur = conn.cursor()
-        try:
-            cur.execute(
-                """
-                SELECT a.id, b.id
-                FROM archivos a
-                JOIN archivos b
-                  ON a.grupo_id = b.grupo_id
-                 AND a.id < b.id
-                WHERE a.grupo_id = %s
-                  AND a.nombre <> '' AND b.nombre <> ''
-                  AND similarity(
-                        regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
-                        regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
-                      ) >= 0.85
-                  AND similarity(a.numero::text, b.numero::text) >= 0.75
-                """,
-                (grupo_id,)
-            )
-            pairs = cur.fetchall()
-        except Exception:
-            app.logger.exception("Error buscando duplicados por nombre")
-        finally:
-            cur.close()
-            conn.close()
-        if usados and pairs:
-            usados_set = set(usados)
-            pairs = [(a_id, b_id) for (a_id, b_id) in pairs if a_id not in usados_set and b_id not in usados_set]
+    analizar_nombres = request.args.get("nombre") == "1"
+    if analizar_nombres:
+        candidatos_ids = [it["id"] for it in items if it["id"] not in usados and it["nombre"]]
+        if candidatos_ids:
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    SELECT a.id, b.id
+                    FROM archivos a
+                    JOIN archivos b
+                      ON a.grupo_id = b.grupo_id
+                     AND a.id < b.id
+                    WHERE a.grupo_id = %s
+                      AND a.nombre <> '' AND b.nombre <> ''
+                      AND similarity(
+                            regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
+                            regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
+                          ) >= 0.85
+                      AND similarity(a.numero::text, b.numero::text) >= 0.75
+                    LIMIT 2000
+                    """,
+                    (grupo_id,)
+                )
+                pairs = cur.fetchall()
+            except Exception:
+                app.logger.exception("Error buscando duplicados por nombre")
+            finally:
+                cur.close()
+                conn.close()
+            if usados and pairs:
+                usados_set = set(usados)
+                pairs = [(a_id, b_id) for (a_id, b_id) in pairs if a_id not in usados_set and b_id not in usados_set]
 
     # Union-Find simple
     parent = {}
@@ -2554,7 +2557,8 @@ def archivo_duplicados():
     return render_template(
         "archivo_duplicados.html",
         grupos=grupos,
-        tipo_doc_opciones=TIPO_DOC_OPCIONES
+        tipo_doc_opciones=TIPO_DOC_OPCIONES,
+        analizar_nombres=analizar_nombres
     )
 
 

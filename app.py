@@ -2476,55 +2476,9 @@ def archivo_duplicados():
             })
             usados.update([x["id"] for x in lst])
 
-    # --- 2) Duplicados por nombre similar (Postgres pg_trgm)
-    # Se ejecuta solo si el usuario lo solicita para evitar timeouts.
+    # --- 2) Duplicados por nombre (desactivado por ahora)
     pairs = []
-    analizar_nombres = request.args.get("nombre") == "1"
-    if analizar_nombres:
-        candidatos_ids = [it["id"] for it in items if it["id"] not in usados and it["nombre"]]
-        if candidatos_ids:
-            conn = get_db()
-            cur = conn.cursor()
-            try:
-                cur.execute("SET LOCAL statement_timeout = 5000")
-                cur.execute(
-                    """
-                    SELECT a.id, b.id
-                    FROM archivos a
-                    JOIN archivos b
-                      ON a.grupo_id = b.grupo_id
-                     AND a.id < b.id
-                    WHERE a.grupo_id = %s
-                      AND a.id = ANY(%s)
-                      AND b.id = ANY(%s)
-                      AND a.nombre <> '' AND b.nombre <> ''
-                      AND left(
-                        regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'), 3
-                      ) = left(
-                        regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g'), 3
-                      )
-                      AND abs(
-                        length(regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g')) -
-                        length(regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g'))
-                      ) <= 4
-                      AND similarity(
-                            regexp_replace(upper(a.nombre), '[^A-Z0-9 ]', '', 'g'),
-                            regexp_replace(upper(b.nombre), '[^A-Z0-9 ]', '', 'g')
-                          ) >= 0.85
-                      AND similarity(a.numero::text, b.numero::text) >= 0.75
-                    LIMIT 2000
-                    """,
-                    (grupo_id, candidatos_ids, candidatos_ids)
-                )
-                pairs = cur.fetchall()
-            except Exception:
-                app.logger.exception("Error buscando duplicados por nombre")
-            finally:
-                cur.close()
-                conn.close()
-            if usados and pairs:
-                usados_set = set(usados)
-                pairs = [(a_id, b_id) for (a_id, b_id) in pairs if a_id not in usados_set and b_id not in usados_set]
+    analizar_nombres = False
 
     # Union-Find simple
     parent = {}

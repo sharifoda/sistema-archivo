@@ -35,12 +35,9 @@
 <div class="dup-header">
   <h2>Duplicados</h2>
   <div style="display:flex; gap:8px;">
-    <a class="btn" href="{{ url_for('archivo_duplicados', nombre='1') }}">Analizar nombres</a>
     <a class="btn" href="{{ url_for('archivo') }}">⬅️ Volver a Archivo</a>
   </div>
 </div>
-{% if not analizar_nombres %}
-  <p class="muted">Tip: presiona “Analizar nombres” para buscar duplicados por nombre (puede tardar un poco).</p>
 {% endif %}
 
 {% if grupos and grupos|length > 0 %}

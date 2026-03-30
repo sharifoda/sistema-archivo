@@ -5,42 +5,71 @@
 {% block content %}
 <div class="inicio-center">
     <div class="inicio-panel">
-        <h1>👋 ¡Bienvenido {{ session.get("usuario") }}!</h1>
+        <section class="hero-panel">
+            <article class="hero-card">
+                <div class="hero-badge">Plataforma documental</div>
+                <h1>Bienvenido {{ session.get("usuario") }}</h1>
+                <p>Gestiona el archivo de forma mas clara, con acceso rapido a documentos, cajas y estructura empresarial desde una sola vista.</p>
 
-        <p>
-            Has iniciado sesion correctamente en el sistema de gestion documental.
-        </p>
+                <ul class="hero-list">
+                    <li>
+                        <span class="hero-list-mark">01</span>
+                        <div>
+                            <strong>Operacion documental centralizada</strong><br>
+                            Consulta, organiza y edita informacion sin salir del flujo principal.
+                        </div>
+                    </li>
+                    <li>
+                        <span class="hero-list-mark">02</span>
+                        <div>
+                            <strong>Control por empresas y roles</strong><br>
+                            Mantiene separacion, orden y permisos segun el perfil del usuario.
+                        </div>
+                    </li>
+                    <li>
+                        <span class="hero-list-mark">03</span>
+                        <div>
+                            <strong>Seguimiento y trazabilidad</strong><br>
+                            Conserva visibilidad sobre los movimientos y el estado del archivo.
+                        </div>
+                    </li>
+                </ul>
+            </article>
 
-        <div style="margin-top: 20px;">
-            <p>Desde aqui puedes:</p>
-            <ul>
-                <li>📁 Administrar archivos</li>
-                <li>📦 Gestionar cajas por rangos</li>
-                <li>🔍 Mantener el control y organizacion de la informacion</li>
-            </ul>
-        </div>
+            <aside class="hero-side">
+                <div class="hero-side-top">
+                    <h3>Resumen operativo</h3>
+                    <p>Panorama rapido del entorno activo para continuar trabajando sin perder contexto.</p>
+                </div>
 
-        <div style="display:flex; gap:12px; margin-top:20px; flex-wrap:wrap;">
-            <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
-                <strong>Documentos</strong>
-                <div style="font-size:24px; margin-top:6px;">{{ total_archivos }}</div>
-            </div>
-            <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:180px; background:#fff;">
-                <strong>Cajas</strong>
-                <div style="font-size:24px; margin-top:6px;">{{ total_cajas }}</div>
-            </div>
-            <div style="border:2px solid #000; border-radius:10px; padding:12px; min-width:220px; background:#fff;">
-                <strong>Empresa activa</strong>
-                <div style="font-size:16px; margin-top:6px;">{{ grupo_actual or "Sin grupo" }}</div>
-            </div>
-        </div>
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-label">Documentos registrados</div>
+                        <div class="kpi-value">{{ total_archivos }}</div>
+                        <div class="kpi-sub">Base documental disponible en el sistema.</div>
+                    </div>
 
-        <div style="margin-top: 20px; display:flex; gap:10px; flex-wrap:wrap;">
-            <a class="btn" href="{{ url_for('archivo') }}">📂 Ir a Archivo</a>
-            {% if session.get("rol") in ["admin", "supervisor"] %}
-              <a class="btn" href="{{ url_for('grupos') }}">👥 Ir a Empresa</a>
-            {% endif %}
-        </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Cajas activas</div>
+                        <div class="kpi-value">{{ total_cajas }}</div>
+                        <div class="kpi-sub">Estructura fisica o logica del archivo actual.</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-label">Empresa activa</div>
+                        <div class="kpi-value" style="font-size: 24px; line-height: 1.2;">{{ grupo_actual or "Sin empresa" }}</div>
+                        <div class="kpi-sub">Contexto actual del usuario dentro de la plataforma.</div>
+                    </div>
+                </div>
+
+                <div class="hero-actions">
+                    <a class="btn btn-primary" href="{{ url_for('archivo') }}">Ir a Archivo</a>
+                    {% if session.get("rol") in ["admin", "supervisor"] %}
+                      <a class="btn" href="{{ url_for('grupos') }}">Ir a Empresa</a>
+                    {% endif %}
+                </div>
+            </aside>
+        </section>
     </div>
 </div>
 {% endblock %}

@@ -1,26 +1,49 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 
 {% block title %}Login{% endblock %}
 
 {% block content %}
+<div class="login-wrap">
+    <section class="login-shell">
+        <div class="login-brand">
+            <div class="login-brand-logo">
+                <img src="{{ url_for('static', filename='Logo SCA Sin Fondo.png') }}" alt="Logo SCA">
+            </div>
+            <p>Soluciones corporativas para archivo con una interfaz mas clara, segura y orientada a la operacion documental.</p>
 
-<h2>🔐 Iniciar sesion</h2>
+            <ul class="login-brand-list">
+                <li>Control centralizado de documentos, cajas y empresas.</li>
+                <li>Acceso por roles para mantener orden operacional.</li>
+                <li>Trazabilidad para auditoria y administracion interna.</li>
+            </ul>
+        </div>
 
-<form method="POST">
-    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
-    <label>Usuario</label><br>
-    <input type="text" name="usuario" required><br><br>
+        <div class="login-panel">
+            <h2>Acceso al sistema</h2>
+            <p>Ingresa con tu usuario corporativo para continuar en la plataforma.</p>
 
-    <label>Contrasena</label><br>
-    <input type="password" name="password" required><br><br>
+            <form class="login-form" method="POST">
+                <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
 
-    <button type="submit">Login</button>
-</form>
+                <div>
+                    <label>Usuario</label>
+                    <input type="text" name="usuario" required>
+                </div>
 
-<br>
+                <div>
+                    <label>Contrasena</label>
+                    <input type="password" name="password" required>
+                </div>
 
-<p>
-    Si necesitas una cuenta, contacta al administrador.
-</p>
+                <div class="login-actions">
+                    <button class="btn btn-primary" type="submit">Ingresar</button>
+                </div>
+            </form>
 
+            <div class="login-help">
+                Si necesitas una cuenta, contacta al administrador del sistema.
+            </div>
+        </div>
+    </section>
+</div>
 {% endblock %}

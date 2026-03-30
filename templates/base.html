@@ -1,91 +1,73 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sistema de Archivos{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        #logout-link {
-            color: #000;
-            text-decoration: none;
-        }
-        .flash {
-            list-style: none;
-            padding: 0;
-            margin: 15px 0;
-        }
-        .flash li {
-            padding: 10px;
-            margin-bottom: 10px;
-            border-radius: 6px;
-        }
-        .flash-success { background-color: #d4edda; }
-        .flash-info { background-color: #d1ecf1; }
-        .flash-error { background-color: #f8d7da; }
-    </style>
 </head>
 <body>
-
-<header>
-    <h2>
-      Sistema de Archivos{% if grupo_actual %} - {{ grupo_actual }}{% endif %}
-    </h2>
-
-    {% if session.get("usuario") %}
-        <div>
-            {{ session["usuario"] }} |
-            <a id="logout-link" href="{{ url_for('logout') }}">Cerrar sesion</a>
+<div class="app-shell">
+    <header class="app-topbar">
+        <div class="brand-block">
+            <div class="brand-mark brand-mark-logo">
+                <img src="{{ url_for('static', filename='Logo SCA Sin Fondo.png') }}" alt="Logo SCA">
+            </div>
+            <div class="brand-copy">
+                <h1>Sistema de Archivos{% if grupo_actual %} - {{ grupo_actual }}{% endif %}</h1>
+                <p>Soluciones corporativas para archivo</p>
+            </div>
         </div>
-    {% endif %}
-</header>
 
-<hr>
+        {% if session.get("usuario") %}
+            <div class="user-strip">
+                <div class="user-badge">
+                    <span>Sesion activa</span>
+                    <strong>{{ session["usuario"] }}</strong>
+                </div>
+                <a id="logout-link" href="{{ url_for('logout') }}">Cerrar sesion</a>
+            </div>
+        {% endif %}
+    </header>
 
-<!-- ✅ Mensajes Flash -->
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-    <ul class="flash">
-      {% for category, message in messages %}
-        <li class="flash-{{ category if category in ['success','info','error'] else 'info' }}">
-          {{ message }}
-        </li>
-      {% endfor %}
-    </ul>
-  {% endif %}
-{% endwith %}
-
-<nav>
-  {% if session.get("usuario") %}
-    <a href="{{ url_for('inicio') }}">Inicio</a>
-    <a href="{{ url_for('archivo') }}">Archivo</a>
-    {% if session.get("rol") in ["admin", "supervisor"] %}
-      {% if session.get("rol") == "supervisor" %}
-        <a href="{{ url_for('grupos') }}">Empresa</a>
+    <nav class="app-nav">
+      {% if session.get("usuario") %}
+        <a href="{{ url_for('inicio') }}">Inicio</a>
+        <a href="{{ url_for('archivo') }}">Archivo</a>
+        {% if session.get("rol") in ["admin", "supervisor"] %}
+          {% if session.get("rol") == "supervisor" %}
+            <a href="{{ url_for('grupos') }}">Empresa</a>
+          {% else %}
+            <a href="{{ url_for('grupos') }}">Empresas</a>
+          {% endif %}
+        {% endif %}
       {% else %}
-        <a href="{{ url_for('grupos') }}">Empresas</a>
+        <a href="{{ url_for('login') }}">Login</a>
       {% endif %}
-    {% endif %}
-  {% else %}
-    <a href="{{ url_for('login') }}">Login</a>
-  {% endif %}
 
-  {% if session.get("rol") == "admin" %}
-    <a href="{{ url_for('admin_logs') }}">Logs</a>
-  {% endif %}
-</nav>
+      {% if session.get("rol") == "admin" %}
+        <a href="{{ url_for('admin_logs') }}">Logs</a>
+      {% endif %}
+    </nav>
 
+    <main class="app-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <ul class="flash">
+              {% for category, message in messages %}
+                <li class="flash-{{ category if category in ['success','info','error'] else 'info' }}">
+                  {{ message }}
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
 
-<hr>
+        {% block content %}
+        {% endblock %}
+    </main>
+</div>
 
-{% block content %}
-{% endblock %}
-
-<!-- ===== PDF Collage Modal ===== -->
 <div id="pdfModalOverlay" class="pdf-modal-overlay"></div>
 <div id="pdfModal" class="pdf-modal">
   <div class="pdf-modal-header">
@@ -108,7 +90,7 @@
       <button type="button" class="btn" onclick="abrirSeleccionadas()">Ver seleccionadas</button>
       <button type="button" class="btn" onclick="descargarSeleccionadas()">Descargar seleccionadas</button>
     </div>
-    <button type="button" class="btn" onclick="abrirPdfCompleto()">Ver PDF completo</button>
+    <button type="button" class="btn btn-primary" onclick="abrirPdfCompleto()">Ver PDF completo</button>
   </div>
 </div>
 
@@ -119,8 +101,5 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="{{ url_for('static', filename='pdf_modal.js') }}"></script>
-
 </body>
 </html>
-
-

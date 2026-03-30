@@ -57,6 +57,7 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
 
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "clave_super_secreta")
+app.config["SESSION_COOKIE_NAME"] = os.environ.get("FLASK_SESSION_COOKIE_NAME", "session")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_SECURE_COOKIES") == "1"

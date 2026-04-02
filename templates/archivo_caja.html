@@ -166,14 +166,6 @@
         <button class="btn" type="button"
                 data-numero="{{ a[0] }}"
                 data-nombre="{{ a[2] }}"
-                data-tipo="{{ a[1] }}"
-                data-append="1"
-                onclick="abrirModalArchivo(this)">
-          Añadir PDF
-        </button>
-        <button class="btn" type="button"
-                data-numero="{{ a[0] }}"
-                data-nombre="{{ a[2] }}"
                 onclick="abrirPdfModal(this)">
           Ver PDF
         </button>
@@ -320,7 +312,6 @@
     const numero = btn.getAttribute("data-numero");
     const nombre = btn.getAttribute("data-nombre") || "";
     const tipo = btn.getAttribute("data-tipo") || "";
-    const append = btn.getAttribute("data-append") === "1";
     const hasPdf = btn.getAttribute("data-has-pdf") === "1";
 
     document.getElementById("numero_old").value = numero;
@@ -334,7 +325,7 @@
       pdfOptions.style.display = hasPdf ? "block" : "none";
     }
     if (appendInput) {
-      appendInput.checked = hasPdf && append;
+      appendInput.checked = false;
     }
     if (removeInput) {
       removeInput.checked = false;

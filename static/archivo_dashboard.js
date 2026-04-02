@@ -144,6 +144,13 @@ if (editarAppendInput && editarRemoveInput) {
   });
 }
 
+["overlayPdfDownload", "modalPdfDownload"].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el && el.parentElement !== document.body) {
+    document.body.appendChild(el);
+  }
+});
+
 /* =========================
    Eventos globales
    ========================= */

@@ -56,9 +56,9 @@ a {
 }
 
 .app-topbar {
-    position: sticky;
-    top: 14px;
-    z-index: 50;
+    position: relative;
+    top: 0;
+    z-index: 10;
     display: flex;
     justify-content: space-between;
     align-items: center;

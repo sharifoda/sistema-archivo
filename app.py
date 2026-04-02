@@ -2602,6 +2602,9 @@ def archivo_duplicados():
     if not login_requerido():
         return redirect(url_for("login"))
 
+    if not admin_requerido():
+        return "Acceso denegado", 403
+
     grupo_id = obtener_grupo_id()
     if not grupo_id:
         return redirect(url_for("grupos"))

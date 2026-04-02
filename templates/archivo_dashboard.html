@@ -50,12 +50,12 @@
 
   /* Modal */
   .modal-overlay{
-    display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9998;
   }
   .modal{
     display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
     width:min(720px,92vw); background:#fff; border-radius:12px; padding:18px;
-    box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:1000;
+    box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:9999;
   }
   .modal .actions{
     display:flex; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap;
@@ -370,7 +370,7 @@
 
   <div class="actions">
     <button type="button" class="btn" onclick="cerrarModal('PdfDownload')">Cerrar</button>
-    <button type="button" class="btn btn-primary" onclick="descargarPdfSeleccionados()">Descargar</button>
+    <button type="button" class="btn" onclick="descargarPdfSeleccionados()">Descargar</button>
   </div>
 </div>
 

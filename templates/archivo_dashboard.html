@@ -63,9 +63,13 @@
   .modal input, .modal select{
     width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
   }
+  body.dashboard-modal-open .app-topbar,
+  body.dashboard-modal-open .app-nav{
+    z-index: 1 !important;
+  }
   .pdf-options-block{
-    display:none;
-    margin-top:12px;
+      display:none;
+      margin-top:12px;
     padding:14px;
     border:1px solid rgba(17, 197, 217, 0.18);
     border-radius:14px;

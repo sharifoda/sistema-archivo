@@ -40,6 +40,7 @@ function hide(id) {
 }
 
 function abrirModal(tipo) {
+  document.body.classList.add("dashboard-modal-open");
   show("overlay" + tipo);
   show("modal" + tipo);
 }
@@ -47,6 +48,14 @@ function abrirModal(tipo) {
 function cerrarModal(tipo, limpiarBuscar = false) {
   hide("overlay" + tipo);
   hide("modal" + tipo);
+
+  const modalAbierto = ["Caja", "Doc", "Buscar", "Editar", "PdfDownload"].some((name) => {
+    const modal = document.getElementById("modal" + name);
+    return modal && modal.style.display === "block";
+  });
+  if (!modalAbierto) {
+    document.body.classList.remove("dashboard-modal-open");
+  }
 
   if (limpiarBuscar) {
     const url = new URL(window.location);

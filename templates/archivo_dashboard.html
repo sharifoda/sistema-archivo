@@ -122,7 +122,29 @@
     bottom: 26px;
     z-index: 2000;
   }
-  .excel-fab .btn{
+  .excel-menu{
+    position: relative;
+    display: inline-block;
+  }
+  .excel-menu-panel{
+    display: none;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 10px);
+    min-width: 220px;
+    padding: 10px;
+    border: 1px solid rgba(17, 197, 217, 0.18);
+    border-radius: 16px;
+    background: rgba(255,255,255,0.98);
+    box-shadow: 0 18px 36px rgba(12, 45, 87, 0.16);
+  }
+  .excel-menu.open .excel-menu-panel{
+    display: grid;
+    gap: 8px;
+  }
+  .excel-menu-item{
+    width: 100%;
+    min-width: 0;
     text-decoration: none;
   }
 
@@ -183,28 +205,20 @@
 
 <!-- Excel -->
 <div class="excel-fab">
-  <a class="btn" href="{{ url_for('export_excel') }}">Descargar Excel</a>
-  <button class="btn" type="button" onclick="abrirModal('ImportExcel')">Importar Excel</button>
-</div>
-
-<!-- ===== MODAL IMPORTAR EXCEL ===== -->
-<div class="modal-overlay" id="overlayImportExcel"></div>
-<div class="modal" id="modalImportExcel">
-  <h3>Importar Excel</h3>
-
-  <form method="post" enctype="multipart/form-data">
-    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
-    <input type="hidden" name="accion" value="importar_excel">
-
-    <label>Archivo Excel</label><br>
-    <input type="file" name="excel" accept=".xlsx,.xls" required><br><br>
-
-    <div class="actions">
-      <button type="button" class="btn" onclick="cerrarModal('ImportExcel')">Cancelar</button>
-      <button type="submit" class="btn">Importar</button>
+  <div class="excel-menu" id="excelMenu">
+    <button class="btn" type="button" onclick="toggleExcelMenu(event)">Excel</button>
+    <div class="excel-menu-panel">
+      <button class="btn excel-menu-item" type="button" onclick="seleccionarExcel()">Subir archivo</button>
+      <a class="btn excel-menu-item" href="{{ url_for('export_excel') }}">Descargar archivo</a>
     </div>
-  </form>
+  </div>
 </div>
+
+<form id="excelUploadForm" method="post" enctype="multipart/form-data" style="display:none;">
+  <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+  <input type="hidden" name="accion" value="importar_excel">
+  <input type="file" name="excel" id="excelFileInput" accept=".xlsx,.xls">
+</form>
 
 <!-- ===== MODAL CREAR CAJA ===== -->
 <div class="modal-overlay" id="overlayCaja"></div>
@@ -345,6 +359,34 @@
 
 <!-- ✅ JS externo (no rojo) -->
 <script src="{{ url_for('static', filename='archivo_dashboard.js') }}"></script>
+<script>
+function toggleExcelMenu(event) {
+  event.stopPropagation();
+  const menu = document.getElementById("excelMenu");
+  if (menu) menu.classList.toggle("open");
+}
+
+function seleccionarExcel() {
+  const menu = document.getElementById("excelMenu");
+  const input = document.getElementById("excelFileInput");
+  if (menu) menu.classList.remove("open");
+  if (input) input.click();
+}
+
+document.addEventListener("click", function (event) {
+  const menu = document.getElementById("excelMenu");
+  if (!menu) return;
+  if (!menu.contains(event.target)) {
+    menu.classList.remove("open");
+  }
+});
+
+document.getElementById("excelFileInput")?.addEventListener("change", function () {
+  if (this.files && this.files.length > 0) {
+    document.getElementById("excelUploadForm").submit();
+  }
+});
+</script>
 
 {% endblock %}
 

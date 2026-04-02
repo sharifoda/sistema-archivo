@@ -930,6 +930,8 @@ def inject_grupo_actual():
         cur.close()
         conn.close()
         nombre = row[0] if row else None
+        if nombre and nombre.startswith("Personal - "):
+            nombre = "Personal"
     return {"grupo_actual": nombre}
 
 

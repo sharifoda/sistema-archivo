@@ -92,6 +92,20 @@ function abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId, tipoDoc) {
   document.getElementById("numero_new").value = BUSQ.doc;
   document.getElementById("nombre_new").value = BUSQ.nombre || "";
   document.getElementById("tipo_doc_new").value = BUSQ.tipoDoc || "";
+  const pdfOptions = document.getElementById("editarPdfOptions");
+  const appendInput = document.getElementById("editar_append_pdf");
+  const removeInput = document.getElementById("editar_remove_pdf");
+  const hasPdf = !!BUSQ.pdf;
+
+  if (pdfOptions) {
+    pdfOptions.style.display = hasPdf ? "block" : "none";
+  }
+  if (appendInput) {
+    appendInput.checked = false;
+  }
+  if (removeInput) {
+    removeInput.checked = false;
+  }
 
   document.getElementById("editarInfo").innerText =
     "Editando documento: " +
@@ -101,6 +115,17 @@ function abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId, tipoDoc) {
     ")";
 
   abrirModal("Editar");
+}
+
+const editarAppendInput = document.getElementById("editar_append_pdf");
+const editarRemoveInput = document.getElementById("editar_remove_pdf");
+if (editarAppendInput && editarRemoveInput) {
+  editarAppendInput.addEventListener("change", function () {
+    if (editarAppendInput.checked) editarRemoveInput.checked = false;
+  });
+  editarRemoveInput.addEventListener("change", function () {
+    if (editarRemoveInput.checked) editarAppendInput.checked = false;
+  });
 }
 
 /* =========================

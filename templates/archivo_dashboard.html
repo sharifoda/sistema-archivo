@@ -58,6 +58,62 @@
   .modal input, .modal select{
     width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
   }
+  .pdf-options-block{
+    display:none;
+    margin-top:12px;
+    padding:14px;
+    border:1px solid rgba(17, 197, 217, 0.18);
+    border-radius:14px;
+    background:linear-gradient(180deg, rgba(244, 248, 251, 0.96), rgba(255, 255, 255, 0.98));
+  }
+  .pdf-options-title{
+    margin:0 0 4px;
+    font-size:14px;
+    font-weight:700;
+    color:#0c2d57;
+  }
+  .pdf-options-sub{
+    margin:0 0 12px;
+    font-size:12px;
+    color:#5a6a7f;
+  }
+  .pdf-option-row{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    padding:12px 14px;
+    border:1px solid #d7e0e8;
+    border-radius:12px;
+    background:#fff;
+  }
+  .pdf-option-row + .pdf-option-row{
+    margin-top:10px;
+  }
+  .pdf-option-row.danger{
+    border-color:rgba(201, 75, 75, 0.24);
+    background:rgba(255, 245, 245, 0.98);
+  }
+  .pdf-option-copy strong{
+    display:block;
+    margin-bottom:3px;
+    color:#112133;
+  }
+  .pdf-option-copy span{
+    display:block;
+    font-size:12px;
+    color:#5a6a7f;
+    line-height:1.35;
+  }
+  .pdf-option-row input[type="checkbox"]{
+    width:18px;
+    height:18px;
+    margin-top:2px;
+    accent-color:#11c5d9;
+  }
+  .pdf-option-row.danger input[type="checkbox"]{
+    accent-color:#c94b4b;
+  }
 
   /* Excel FAB */
   .excel-fab{
@@ -245,20 +301,28 @@
     <input type="text" name="nombre_new" id="nombre_new" required><br><br>
 
     <label>PDF (opcional)</label><br>
-    <input type="file" name="pdf" accept="application/pdf"><br><br>
+    <input type="file" name="pdf" accept="application/pdf"><br>
 
-    <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
-      <input type="checkbox" name="append_pdf" value="1">
-      Añadir PDF (unir con el actual)
-    </label>
-    <br>
+    <div class="pdf-options-block" id="editarPdfOptions">
+      <p class="pdf-options-title">Opciones del PDF</p>
+      <p class="pdf-options-sub">Si el documento ya tiene un PDF, puedes unir uno nuevo o quitar el actual.</p>
 
-    <!-- ✅ NUEVO: eliminar PDF actual -->
-    <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
-      <input type="checkbox" name="remove_pdf" value="1">
-      Eliminar PDF actual (si existe)
-    </label>
-    <br>
+      <label class="pdf-option-row" for="editar_append_pdf">
+        <div class="pdf-option-copy">
+          <strong>Añadir PDF</strong>
+          <span>Une el PDF nuevo con el archivo ya guardado.</span>
+        </div>
+        <input type="checkbox" name="append_pdf" id="editar_append_pdf" value="1">
+      </label>
+
+      <label class="pdf-option-row danger" for="editar_remove_pdf">
+        <div class="pdf-option-copy">
+          <strong>Eliminar PDF actual</strong>
+          <span>Borra el PDF existente antes de guardar los cambios.</span>
+        </div>
+        <input type="checkbox" name="remove_pdf" id="editar_remove_pdf" value="1">
+      </label>
+    </div>
 
     <div class="actions">
       <button type="button" class="btn" onclick="cerrarModal('Editar')">Cancelar</button>

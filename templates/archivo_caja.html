@@ -39,6 +39,62 @@
   .modal .actions{
     display:flex; justify-content:space-between; margin-top:14px; gap:10px;
   }
+  .pdf-options-block{
+    display:none;
+    margin-top:14px;
+    padding:14px;
+    border:1px solid rgba(17, 197, 217, 0.18);
+    border-radius:14px;
+    background:linear-gradient(180deg, rgba(244, 248, 251, 0.96), rgba(255, 255, 255, 0.98));
+  }
+  .pdf-options-title{
+    margin:0 0 4px;
+    font-size:14px;
+    font-weight:700;
+    color:#0c2d57;
+  }
+  .pdf-options-sub{
+    margin:0 0 12px;
+    font-size:12px;
+    color:#5a6a7f;
+  }
+  .pdf-option-row{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    padding:12px 14px;
+    border:1px solid #d7e0e8;
+    border-radius:12px;
+    background:#fff;
+  }
+  .pdf-option-row + .pdf-option-row{
+    margin-top:10px;
+  }
+  .pdf-option-row.danger{
+    border-color:rgba(201, 75, 75, 0.24);
+    background:rgba(255, 245, 245, 0.98);
+  }
+  .pdf-option-copy strong{
+    display:block;
+    margin-bottom:3px;
+    color:#112133;
+  }
+  .pdf-option-copy span{
+    display:block;
+    font-size:12px;
+    color:#5a6a7f;
+    line-height:1.35;
+  }
+  .pdf-option-row input[type="checkbox"]{
+    width:18px;
+    height:18px;
+    margin-top:2px;
+    accent-color:#11c5d9;
+  }
+  .pdf-option-row.danger input[type="checkbox"]{
+    accent-color:#c94b4b;
+  }
 </style>
 
 <div class="header-row">
@@ -91,6 +147,7 @@
               data-numero="{{ a[0] }}"
               data-nombre="{{ a[2] }}"
               data-tipo="{{ a[1] }}"
+              data-has-pdf="{{ 1 if a|length > 3 and a[3] else 0 }}"
               onclick="abrirModalArchivo(this)">
         Modificar
       </button>
@@ -211,16 +268,26 @@
     <label>PDF (opcional)</label>
     <input type="file" name="pdf" accept="application/pdf">
 
-    <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
-      <input type="checkbox" name="append_pdf" id="append_pdf" value="1">
-      Añadir PDF (unir con el actual)
-    </label>
+    <div class="pdf-options-block" id="archivoPdfOptions">
+      <p class="pdf-options-title">Opciones del PDF</p>
+      <p class="pdf-options-sub">Como este documento ya tiene un PDF guardado, puedes unir el nuevo archivo o eliminar el actual.</p>
 
-    <!-- 🗑️ NUEVO: eliminar PDF -->
-    <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
-      <input type="checkbox" name="remove_pdf" value="1">
-      Eliminar PDF actual
-    </label>
+      <label class="pdf-option-row" for="append_pdf">
+        <div class="pdf-option-copy">
+          <strong>Añadir PDF</strong>
+          <span>Une el PDF nuevo con el PDF que ya está guardado en el sistema.</span>
+        </div>
+        <input type="checkbox" name="append_pdf" id="append_pdf" value="1">
+      </label>
+
+      <label class="pdf-option-row danger" for="remove_pdf">
+        <div class="pdf-option-copy">
+          <strong>Eliminar PDF actual</strong>
+          <span>Borra el PDF guardado. Úsalo si quieres dejar el documento sin archivo o reemplazarlo por otro.</span>
+        </div>
+        <input type="checkbox" name="remove_pdf" id="remove_pdf" value="1">
+      </label>
+    </div>
 
     <div class="actions">
       <button class="btn" type="button" onclick="cerrarModalArchivo()">Cancelar</button>
@@ -254,16 +321,21 @@
     const nombre = btn.getAttribute("data-nombre") || "";
     const tipo = btn.getAttribute("data-tipo") || "";
     const append = btn.getAttribute("data-append") === "1";
+    const hasPdf = btn.getAttribute("data-has-pdf") === "1";
 
     document.getElementById("numero_old").value = numero;
     document.getElementById("numero_new").value = numero;
     document.getElementById("nombre_new").value = nombre;
     document.getElementById("tipo_doc_new").value = tipo;
+    const pdfOptions = document.getElementById("archivoPdfOptions");
     const appendInput = document.getElementById("append_pdf");
-    if (appendInput) {
-      appendInput.checked = append;
+    const removeInput = document.getElementById("remove_pdf");
+    if (pdfOptions) {
+      pdfOptions.style.display = hasPdf ? "block" : "none";
     }
-    const removeInput = document.querySelector("input[name='remove_pdf']");
+    if (appendInput) {
+      appendInput.checked = hasPdf && append;
+    }
     if (removeInput) {
       removeInput.checked = false;
     }
@@ -286,6 +358,19 @@
   document.addEventListener("keydown", function(e){
     if (e.key === "Escape") { cerrarModalCaja(); cerrarModalArchivo(); }
   });
+
+  (function(){
+    const appendInput = document.getElementById("append_pdf");
+    const removeInput = document.getElementById("remove_pdf");
+    if (appendInput && removeInput) {
+      appendInput.addEventListener("change", function(){
+        if (appendInput.checked) removeInput.checked = false;
+      });
+      removeInput.addEventListener("change", function(){
+        if (removeInput.checked) appendInput.checked = false;
+      });
+    }
+  })();
 </script>
 
 {% endblock %}

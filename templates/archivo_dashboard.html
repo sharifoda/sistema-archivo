@@ -281,7 +281,9 @@
 
   <div class="right">
     <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+      {% if session.get("rol") == "admin" %}
       <a class="btn" href="{{ url_for('archivo_duplicados') }}">Duplicados</a>
+      {% endif %}
       <button class="btn" type="button" onclick="abrirModal('Doc')">Agregar Documento</button>
     </div>
   </div>
@@ -363,7 +365,7 @@
 
   <div class="actions">
     <button type="button" class="btn" onclick="cerrarModal('PdfDownload')">Cerrar</button>
-    <button type="button" class="btn btn-primary" onclick="descargarPdfSeleccionados()">Descargar seleccionados</button>
+    <button type="button" class="btn btn-primary" onclick="descargarPdfSeleccionados()">Descargar</button>
   </div>
 </div>
 

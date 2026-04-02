@@ -197,10 +197,9 @@ function renderBulkPdfBoxes() {
       const selectedInBox = box.docs.filter((doc) => BULK_PDF.selectedDocs.has(String(doc.numero))).length;
       return `
         <label class="bulk-box-item ${box.id === BULK_PDF.activeBoxId ? "active" : ""}" onclick="setActiveBulkBox(${box.id})">
-          <input type="checkbox" ${selectedInBox === box.docs.length && box.docs.length ? "checked" : ""} onclick="event.stopPropagation(); toggleBulkBox(${box.id}, this.checked)">
           <div class="bulk-box-copy">
             <strong>Caja ${box.numero}</strong>
-            <span>${box.docs.length} PDF${box.docs.length === 1 ? "" : "s"} disponibles</span>
+            <span>${box.docs.length} PDF${box.docs.length === 1 ? "" : "s"} disponibles${selectedInBox ? " · " + selectedInBox + " marcado" + (selectedInBox === 1 ? "" : "s") : ""}</span>
           </div>
         </label>
       `;
@@ -257,15 +256,6 @@ function toggleBulkDoc(numero, checked) {
 }
 
 function toggleBulkBox(boxId, checked) {
-  const box = getBulkBox(boxId);
-  if (!box) return;
-  box.docs.forEach((doc) => {
-    if (checked) {
-      BULK_PDF.selectedDocs.add(String(doc.numero));
-    } else {
-      BULK_PDF.selectedDocs.delete(String(doc.numero));
-    }
-  });
   BULK_PDF.activeBoxId = boxId;
   renderBulkPdfBoxes();
 }

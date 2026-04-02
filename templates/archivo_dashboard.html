@@ -154,6 +154,99 @@
     min-width: 0;
     text-decoration: none;
   }
+  .bulk-download-layout{
+    display:grid;
+    grid-template-columns: 220px 1fr;
+    gap: 14px;
+    min-height: 360px;
+  }
+  .bulk-boxes{
+    border:1px solid #d7e0e8;
+    border-radius:16px;
+    background:rgba(255,255,255,0.96);
+    overflow:auto;
+    max-height: 420px;
+  }
+  .bulk-box-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:12px 14px;
+    border-bottom:1px solid #d7e0e8;
+    cursor:pointer;
+  }
+  .bulk-box-item:last-child{
+    border-bottom:0;
+  }
+  .bulk-box-item.active{
+    background:rgba(17,197,217,0.10);
+  }
+  .bulk-box-copy strong{
+    display:block;
+    color:#173b69;
+  }
+  .bulk-box-copy span{
+    display:block;
+    font-size:12px;
+    color:#5a6a7f;
+  }
+  .bulk-docs{
+    border:1px solid #d7e0e8;
+    border-radius:16px;
+    background:rgba(255,255,255,0.96);
+    padding:14px;
+  }
+  .bulk-docs-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:12px;
+  }
+  .bulk-doc-actions{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .bulk-doc-list{
+    display:grid;
+    gap:10px;
+    max-height:320px;
+    overflow:auto;
+  }
+  .bulk-doc-item{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    padding:12px 14px;
+    border:1px solid #d7e0e8;
+    border-radius:14px;
+    background:#fff;
+  }
+  .bulk-doc-copy strong{
+    display:block;
+    color:#112133;
+  }
+  .bulk-doc-copy span{
+    display:block;
+    font-size:12px;
+    color:#5a6a7f;
+  }
+  .bulk-empty{
+    color:#5a6a7f;
+    font-size:14px;
+    padding:18px 6px;
+  }
+  .bulk-summary{
+    font-size:13px;
+    color:#5a6a7f;
+  }
+  @media (max-width: 780px) {
+    .bulk-download-layout{
+      grid-template-columns: 1fr;
+    }
+  }
 
   /* tabla modal */
   .table-wrap{ overflow:auto; }
@@ -223,7 +316,7 @@
     <button class="btn" type="button" onclick="togglePdfMenu(event)">PDF</button>
     <div class="pdf-bulk-menu-panel">
       <button class="btn pdf-menu-item" type="button" onclick="seleccionarPdfMasivos()">Carga masiva</button>
-      <button class="btn pdf-menu-item btn-disabled" type="button" onclick="alert('Descarga masiva disponible pronto.');">Descarga masiva</button>
+      <button class="btn pdf-menu-item" type="button" onclick="abrirDescargaMasivaPdf()">Descarga masiva</button>
     </div>
   </div>
 </div>
@@ -238,6 +331,41 @@
   <input type="hidden" name="accion" value="carga_masiva_pdf">
   <input type="file" name="pdfs" id="pdfBulkFileInput" accept="application/pdf,.pdf" multiple>
 </form>
+
+<div class="modal-overlay" id="overlayPdfDownload"></div>
+<div class="modal" id="modalPdfDownload" style="width:min(920px,94vw);">
+  <h3>Descarga masiva de PDF</h3>
+  <p style="margin:6px 0 14px; color:#5a6a7f;">Selecciona una o varias cajas y luego marca solo los PDFs que quieres incluir en el ZIP.</p>
+
+  <div class="bulk-download-layout">
+    <div class="bulk-boxes" id="bulkBoxesList"></div>
+
+    <div class="bulk-docs">
+      <div class="bulk-docs-header">
+        <div>
+          <strong id="bulkDocsTitle">Selecciona una caja</strong>
+          <div class="bulk-summary" id="bulkDocsSummary">Solo se descargarán los PDFs marcados.</div>
+        </div>
+        <div class="bulk-doc-actions">
+          <button type="button" class="btn" onclick="seleccionarTodosCajaActiva()">Seleccionar todos</button>
+          <button type="button" class="btn" onclick="limpiarCajaActiva()">Limpiar caja</button>
+        </div>
+      </div>
+      <div class="bulk-doc-list" id="bulkDocsList"></div>
+    </div>
+  </div>
+
+  <form method="post" id="bulkPdfDownloadForm">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+    <input type="hidden" name="accion" value="descarga_masiva_pdf">
+    <input type="hidden" name="selected_docs" id="bulkSelectedDocs">
+  </form>
+
+  <div class="actions">
+    <button type="button" class="btn" onclick="cerrarModal('PdfDownload')">Cerrar</button>
+    <button type="button" class="btn btn-primary" onclick="descargarPdfSeleccionados()">Descargar seleccionados</button>
+  </div>
+</div>
 
 <!-- ===== MODAL CREAR CAJA ===== -->
 <div class="modal-overlay" id="overlayCaja"></div>
@@ -372,7 +500,8 @@
        "urlCajaBase": url_for("archivo_caja", caja_id=0),
        "urlPdfBase":  url_for("ver_pdf", numero=0),
        "resultado":   resultado,
-       "csrfToken":   csrf_token()
+       "csrfToken":   csrf_token(),
+       "pdfBulkData": pdf_bulk_data
      } | tojson }}'>
 </div>
 
@@ -407,6 +536,15 @@ function seleccionarPdfMasivos() {
   const input = document.getElementById("pdfBulkFileInput");
   if (menu) menu.classList.remove("open");
   if (input) input.click();
+}
+
+function abrirDescargaMasivaPdf() {
+  const menu = document.getElementById("pdfBulkMenu");
+  if (menu) menu.classList.remove("open");
+  if (typeof window.renderBulkPdfBoxes === "function") {
+    window.renderBulkPdfBoxes();
+  }
+  abrirModal("PdfDownload");
 }
 
 document.addEventListener("click", function (event) {

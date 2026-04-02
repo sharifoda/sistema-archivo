@@ -42,6 +42,7 @@ from flask import flash
 import threading
 import uuid
 import re
+import zipfile
 try:
     from PyPDF2 import PdfReader, PdfWriter
 except Exception:
@@ -1747,6 +1748,71 @@ def archivo():
             )
             return redirect(url_for("archivo"))
 
+        # ---------- Descarga masiva PDF ----------
+        if accion == "descarga_masiva_pdf":
+            selected_raw = request.form.get("selected_docs", "").strip()
+            if not selected_raw:
+                flash("Debes seleccionar al menos un PDF para descargar.", "error")
+                return redirect(url_for("archivo"))
+
+            selected_docs = []
+            for value in selected_raw.split(","):
+                value = value.strip()
+                if value.isdigit():
+                    selected_docs.append(int(value))
+
+            selected_docs = list(dict.fromkeys(selected_docs))
+            if not selected_docs:
+                flash("La selección de PDFs no es válida.", "error")
+                return redirect(url_for("archivo"))
+
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT numero, nombre, pdf_path
+                FROM archivos
+                WHERE grupo_id = %s
+                  AND numero = ANY(%s)
+                  AND pdf_path IS NOT NULL
+                ORDER BY numero
+                """,
+                (grupo_id, selected_docs)
+            )
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            if not rows:
+                flash("No se encontraron PDFs para la selección indicada.", "error")
+                return redirect(url_for("archivo"))
+
+            zip_buffer = BytesIO()
+            agregados = 0
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for numero, nombre, pdf_path in rows:
+                    abs_path = pdf_path
+                    if not os.path.isabs(abs_path):
+                        abs_path = os.path.join(app.config["UPLOAD_FOLDER"], abs_path)
+                    if not os.path.exists(abs_path):
+                        continue
+                    safe_name = secure_filename(str(nombre or f"documento_{numero}")) or f"documento_{numero}"
+                    zip_file.write(abs_path, arcname=f"{numero}_{safe_name}.pdf")
+                    agregados += 1
+
+            if not agregados:
+                flash("Los PDFs seleccionados no están disponibles en el servidor.", "error")
+                return redirect(url_for("archivo"))
+
+            zip_buffer.seek(0)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            return send_file(
+                zip_buffer,
+                as_attachment=True,
+                download_name=f"pdfs_seleccionados_{timestamp}.zip",
+                mimetype="application/zip"
+            )
+
         # ---------- Crear Caja ----------
         if accion == "crear_caja":
             rmin = int(request.form["rango_min"])
@@ -2190,14 +2256,49 @@ def archivo():
     """, (grupo_id, grupo_id, grupo_id))
 
     cajas = cur.fetchall()
+
+    cajas_map = {c[0]: c[1] for c in cajas}
+
+    cur.execute(
+        """
+        SELECT a.caja_id, a.numero, a.nombre, a.tipo_doc
+        FROM archivos a
+        WHERE a.grupo_id = %s
+          AND a.pdf_path IS NOT NULL
+        ORDER BY a.caja_id, a.numero
+        """,
+        (grupo_id,)
+    )
+    pdf_rows = cur.fetchall()
     cur.close()
     conn.close()
+
+    pdf_bulk_data = []
+    docs_by_box = {}
+    for caja_id, numero, nombre, tipo_doc in pdf_rows:
+        docs_by_box.setdefault(caja_id, []).append({
+            "numero": numero,
+            "nombre": nombre,
+            "tipo_doc": tipo_doc,
+        })
+
+    for caja in cajas:
+        caja_id = caja[0]
+        docs = docs_by_box.get(caja_id, [])
+        if not docs:
+            continue
+        pdf_bulk_data.append({
+            "id": caja_id,
+            "numero": caja[1],
+            "docs": docs,
+        })
 
     return render_template(
         "archivo_dashboard.html",
         cajas=cajas,
         resultado=resultado,
-        archivador_mode=archivador_mode
+        archivador_mode=archivador_mode,
+        pdf_bulk_data=pdf_bulk_data
     )
 
 # ---------------- archivo_caja ----------------

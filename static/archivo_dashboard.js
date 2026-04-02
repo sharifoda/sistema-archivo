@@ -8,6 +8,7 @@ const URL_CAJA_BASE = data.urlCajaBase;
 const URL_PDF_BASE  = data.urlPdfBase;
 const resultado     = data.resultado;
 const csrfToken     = data.csrfToken || "";
+const PDF_BULK_DATA = Array.isArray(data.pdfBulkData) ? data.pdfBulkData : [];
 
 /* =========================
    Estado global de búsqueda
@@ -19,6 +20,12 @@ const BUSQ = {
   doc: null,
   nombre: null,
   pdf: null
+};
+
+const BULK_PDF = {
+  boxes: PDF_BULK_DATA,
+  activeBoxId: PDF_BULK_DATA.length ? PDF_BULK_DATA[0].id : null,
+  selectedDocs: new Set()
 };
 
 /* =========================
@@ -134,7 +141,7 @@ if (editarAppendInput && editarRemoveInput) {
 
 // Cerrar modal al hacer click en overlay
 document.addEventListener("click", function (e) {
-  ["Caja", "Doc", "Buscar", "Editar"].forEach(tipo => {
+  ["Caja", "Doc", "Buscar", "Editar", "PdfDownload"].forEach(tipo => {
     const ov = document.getElementById("overlay" + tipo);
     if (e.target === ov) {
       cerrarModal(tipo, tipo === "Buscar");
@@ -150,7 +157,144 @@ document.addEventListener("keydown", function (e) {
   cerrarModal("Doc");
   cerrarModal("Buscar", true);
   cerrarModal("Editar");
+  cerrarModal("PdfDownload");
 });
+
+function getBulkBox(boxId) {
+  return BULK_PDF.boxes.find((box) => box.id === boxId) || null;
+}
+
+function updateBulkSummary() {
+  const total = BULK_PDF.selectedDocs.size;
+  const el = document.getElementById("bulkDocsSummary");
+  if (!el) return;
+  el.textContent =
+    total > 0
+      ? `${total} PDF${total === 1 ? "" : "s"} marcado${total === 1 ? "" : "s"} para descargar.`
+      : "Solo se descargarán los PDFs marcados.";
+}
+
+function renderBulkPdfBoxes() {
+  const list = document.getElementById("bulkBoxesList");
+  if (!list) return;
+
+  if (!BULK_PDF.boxes.length) {
+    list.innerHTML = `<div class="bulk-empty">No hay cajas con PDFs disponibles.</div>`;
+    const docsList = document.getElementById("bulkDocsList");
+    if (docsList) docsList.innerHTML = `<div class="bulk-empty">No hay PDFs para descargar.</div>`;
+    const title = document.getElementById("bulkDocsTitle");
+    if (title) title.textContent = "Sin PDFs";
+    updateBulkSummary();
+    return;
+  }
+
+  if (!getBulkBox(BULK_PDF.activeBoxId)) {
+    BULK_PDF.activeBoxId = BULK_PDF.boxes[0].id;
+  }
+
+  list.innerHTML = BULK_PDF.boxes
+    .map((box) => {
+      const selectedInBox = box.docs.filter((doc) => BULK_PDF.selectedDocs.has(String(doc.numero))).length;
+      return `
+        <label class="bulk-box-item ${box.id === BULK_PDF.activeBoxId ? "active" : ""}" onclick="setActiveBulkBox(${box.id})">
+          <input type="checkbox" ${selectedInBox === box.docs.length && box.docs.length ? "checked" : ""} onclick="event.stopPropagation(); toggleBulkBox(${box.id}, this.checked)">
+          <div class="bulk-box-copy">
+            <strong>Caja ${box.numero}</strong>
+            <span>${box.docs.length} PDF${box.docs.length === 1 ? "" : "s"} disponibles</span>
+          </div>
+        </label>
+      `;
+    })
+    .join("");
+
+  renderBulkPdfDocs();
+}
+
+function setActiveBulkBox(boxId) {
+  BULK_PDF.activeBoxId = boxId;
+  renderBulkPdfBoxes();
+}
+
+function renderBulkPdfDocs() {
+  const box = getBulkBox(BULK_PDF.activeBoxId);
+  const title = document.getElementById("bulkDocsTitle");
+  const list = document.getElementById("bulkDocsList");
+  if (!title || !list) return;
+
+  if (!box) {
+    title.textContent = "Selecciona una caja";
+    list.innerHTML = `<div class="bulk-empty">Selecciona una caja para ver sus PDFs.</div>`;
+    updateBulkSummary();
+    return;
+  }
+
+  title.textContent = `Caja ${box.numero}`;
+  list.innerHTML = box.docs
+    .map((doc) => {
+      const checked = BULK_PDF.selectedDocs.has(String(doc.numero)) ? "checked" : "";
+      return `
+        <label class="bulk-doc-item">
+          <div class="bulk-doc-copy">
+            <strong>${formatMiles(doc.numero)}${doc.tipo_doc ? " · " + doc.tipo_doc : ""}</strong>
+            <span>${String(doc.nombre || "").toUpperCase()}</span>
+          </div>
+          <input type="checkbox" ${checked} onchange="toggleBulkDoc('${doc.numero}', this.checked)">
+        </label>
+      `;
+    })
+    .join("");
+
+  updateBulkSummary();
+}
+
+function toggleBulkDoc(numero, checked) {
+  if (checked) {
+    BULK_PDF.selectedDocs.add(String(numero));
+  } else {
+    BULK_PDF.selectedDocs.delete(String(numero));
+  }
+  renderBulkPdfBoxes();
+}
+
+function toggleBulkBox(boxId, checked) {
+  const box = getBulkBox(boxId);
+  if (!box) return;
+  box.docs.forEach((doc) => {
+    if (checked) {
+      BULK_PDF.selectedDocs.add(String(doc.numero));
+    } else {
+      BULK_PDF.selectedDocs.delete(String(doc.numero));
+    }
+  });
+  BULK_PDF.activeBoxId = boxId;
+  renderBulkPdfBoxes();
+}
+
+function seleccionarTodosCajaActiva() {
+  const box = getBulkBox(BULK_PDF.activeBoxId);
+  if (!box) return;
+  box.docs.forEach((doc) => BULK_PDF.selectedDocs.add(String(doc.numero)));
+  renderBulkPdfBoxes();
+}
+
+function limpiarCajaActiva() {
+  const box = getBulkBox(BULK_PDF.activeBoxId);
+  if (!box) return;
+  box.docs.forEach((doc) => BULK_PDF.selectedDocs.delete(String(doc.numero)));
+  renderBulkPdfBoxes();
+}
+
+function descargarPdfSeleccionados() {
+  if (!BULK_PDF.selectedDocs.size) {
+    alert("Debes seleccionar al menos un PDF.");
+    return;
+  }
+  const input = document.getElementById("bulkSelectedDocs");
+  const form = document.getElementById("bulkPdfDownloadForm");
+  if (!input || !form) return;
+  input.value = Array.from(BULK_PDF.selectedDocs).join(",");
+  form.submit();
+}
 
 document.addEventListener("click", function (e) {
   const btn = e.target.closest(".btn-modificar-busq");

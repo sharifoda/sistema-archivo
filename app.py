@@ -164,6 +164,22 @@ def unir_pdf_existente(pdf_old, file, numero_documento, grupo_id):
         return None
 
 
+def obtener_numero_desde_nombre_pdf(filename):
+    if not filename:
+        return None
+    base = os.path.basename(filename)
+    nombre, ext = os.path.splitext(base)
+    if ext.lower() != ".pdf":
+        return None
+    nombre = nombre.strip()
+    if not re.fullmatch(r"\d+", nombre):
+        return None
+    try:
+        return int(nombre)
+    except Exception:
+        return None
+
+
 def login_requerido():
     return "usuario" in session
 
@@ -1656,6 +1672,79 @@ def archivo():
             t.start()
 
             flash("Importacion iniciada. Puedes seguir usando el sistema.", "info")
+            return redirect(url_for("archivo"))
+
+        # ---------- Carga masiva PDF ----------
+        if accion == "carga_masiva_pdf":
+            pdf_files = request.files.getlist("pdfs")
+            pdf_files = [f for f in pdf_files if f and f.filename]
+            if not pdf_files:
+                flash("Debes seleccionar al menos un PDF.", "error")
+                return redirect(url_for("archivo"))
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            nuevos = 0
+            unidos = 0
+            no_encontrados = 0
+            invalidos = 0
+
+            for file in pdf_files:
+                if not es_pdf(file):
+                    invalidos += 1
+                    continue
+
+                numero = obtener_numero_desde_nombre_pdf(file.filename)
+                if numero is None:
+                    invalidos += 1
+                    continue
+
+                cur.execute(
+                    "SELECT id, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                    (numero, grupo_id)
+                )
+                row = cur.fetchone()
+                if not row:
+                    no_encontrados += 1
+                    continue
+
+                archivo_id, pdf_old = row
+                file.stream.seek(0)
+
+                if pdf_old:
+                    pdf_name = unir_pdf_existente(pdf_old, file, numero, grupo_id)
+                    if not pdf_name:
+                        invalidos += 1
+                        continue
+                    unidos += 1
+                else:
+                    pdf_name = guardar_pdf(file, numero, grupo_id)
+                    nuevos += 1
+
+                cur.execute(
+                    "UPDATE archivos SET pdf_path = %s WHERE id = %s AND grupo_id = %s",
+                    (pdf_name, archivo_id, grupo_id)
+                )
+
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="archivo",
+                    entidad_id=archivo_id,
+                    accion="CARGA_MASIVA_PDF",
+                    datos_antes={"pdf_path": pdf_old},
+                    datos_despues={"pdf_path": pdf_name, "numero": numero},
+                )
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            flash(
+                f"Carga masiva finalizada. Nuevos: {nuevos}, unidos: {unidos}, no encontrados: {no_encontrados}, invalidos: {invalidos}.",
+                "success" if (nuevos or unidos) else "info"
+            )
             return redirect(url_for("archivo"))
 
         # ---------- Crear Caja ----------

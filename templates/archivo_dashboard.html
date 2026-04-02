@@ -121,12 +121,17 @@
     right: 26px;
     bottom: 26px;
     z-index: 2000;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
   }
-  .excel-menu{
+  .excel-menu,
+  .pdf-bulk-menu{
     position: relative;
     display: inline-block;
   }
-  .excel-menu-panel{
+  .excel-menu-panel,
+  .pdf-bulk-menu-panel{
     display: none;
     position: absolute;
     right: 0;
@@ -138,11 +143,13 @@
     background: rgba(255,255,255,0.98);
     box-shadow: 0 18px 36px rgba(12, 45, 87, 0.16);
   }
-  .excel-menu.open .excel-menu-panel{
+  .excel-menu.open .excel-menu-panel,
+  .pdf-bulk-menu.open .pdf-bulk-menu-panel{
     display: grid;
     gap: 8px;
   }
-  .excel-menu-item{
+  .excel-menu-item,
+  .pdf-menu-item{
     width: 100%;
     min-width: 0;
     text-decoration: none;
@@ -212,12 +219,24 @@
       <a class="btn excel-menu-item" href="{{ url_for('export_excel') }}">Descargar archivo</a>
     </div>
   </div>
+  <div class="pdf-bulk-menu" id="pdfBulkMenu">
+    <button class="btn" type="button" onclick="togglePdfMenu(event)">PDF</button>
+    <div class="pdf-bulk-menu-panel">
+      <button class="btn pdf-menu-item" type="button" onclick="seleccionarPdfMasivos()">Carga masiva</button>
+      <button class="btn pdf-menu-item btn-disabled" type="button" onclick="alert('Descarga masiva disponible pronto.');">Descarga masiva</button>
+    </div>
+  </div>
 </div>
 
 <form id="excelUploadForm" method="post" enctype="multipart/form-data" style="display:none;">
   <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
   <input type="hidden" name="accion" value="importar_excel">
   <input type="file" name="excel" id="excelFileInput" accept=".xlsx,.xls">
+</form>
+<form id="pdfBulkUploadForm" method="post" enctype="multipart/form-data" style="display:none;">
+  <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+  <input type="hidden" name="accion" value="carga_masiva_pdf">
+  <input type="file" name="pdfs" id="pdfBulkFileInput" accept="application/pdf,.pdf" multiple>
 </form>
 
 <!-- ===== MODAL CREAR CAJA ===== -->
@@ -363,6 +382,16 @@
 function toggleExcelMenu(event) {
   event.stopPropagation();
   const menu = document.getElementById("excelMenu");
+  const pdfMenu = document.getElementById("pdfBulkMenu");
+  if (pdfMenu) pdfMenu.classList.remove("open");
+  if (menu) menu.classList.toggle("open");
+}
+
+function togglePdfMenu(event) {
+  event.stopPropagation();
+  const menu = document.getElementById("pdfBulkMenu");
+  const excelMenu = document.getElementById("excelMenu");
+  if (excelMenu) excelMenu.classList.remove("open");
   if (menu) menu.classList.toggle("open");
 }
 
@@ -373,17 +402,33 @@ function seleccionarExcel() {
   if (input) input.click();
 }
 
+function seleccionarPdfMasivos() {
+  const menu = document.getElementById("pdfBulkMenu");
+  const input = document.getElementById("pdfBulkFileInput");
+  if (menu) menu.classList.remove("open");
+  if (input) input.click();
+}
+
 document.addEventListener("click", function (event) {
   const menu = document.getElementById("excelMenu");
-  if (!menu) return;
-  if (!menu.contains(event.target)) {
+  const pdfMenu = document.getElementById("pdfBulkMenu");
+  if (menu && !menu.contains(event.target)) {
     menu.classList.remove("open");
+  }
+  if (pdfMenu && !pdfMenu.contains(event.target)) {
+    pdfMenu.classList.remove("open");
   }
 });
 
 document.getElementById("excelFileInput")?.addEventListener("change", function () {
   if (this.files && this.files.length > 0) {
     document.getElementById("excelUploadForm").submit();
+  }
+});
+
+document.getElementById("pdfBulkFileInput")?.addEventListener("change", function () {
+  if (this.files && this.files.length > 0) {
+    document.getElementById("pdfBulkUploadForm").submit();
   }
 });
 </script>

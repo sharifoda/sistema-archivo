@@ -10,6 +10,7 @@ from cajas import (
     eliminar_caja,
     modificar_caja,
     asegurar_caja_sin_asignar,
+    reparar_archivos_huerfanos,
     reubicar_archivos_de_caja,
     reubicar_archivos_pendientes_por_nueva_caja
 )
@@ -24,13 +25,13 @@ from grupos import (
     buscar_usuario_por_nombre,
     usuario_puede_eliminar,
     quitar_usuario_de_grupo,
+    sincronizar_registros_usuario,
     eliminar_grupo_personal,
     archivar_grupo
 )
 from logs import registrar_log
 from historial import registrar_movimiento
 from werkzeug.security import generate_password_hash
-from psycopg2.extras import execute_values, Json
 from db import get_db
 from io import BytesIO
 from datetime import datetime
@@ -96,6 +97,98 @@ def normalizar_nombre_clave(nombre):
             limpio.append(ch)
     base = "".join(limpio)
     return " ".join(base.split())
+
+
+def json_text(value):
+    return json.dumps(value, ensure_ascii=False) if value is not None else None
+
+
+def json_or_none(value):
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return None
+
+
+def rows_to_builtin(rows):
+    return [list(row) for row in rows]
+
+
+def insert_with_identity(cur, table_name, sql, params):
+    cur.execute(f"SET IDENTITY_INSERT {table_name} ON")
+    try:
+        cur.execute(sql, params)
+    finally:
+        cur.execute(f"SET IDENTITY_INSERT {table_name} OFF")
+
+
+def sqlserver_in_clause(values):
+    values = list(values)
+    if not values:
+        return "(NULL)", tuple()
+    return "(" + ", ".join(["%s"] * len(values)) + ")", tuple(values)
+
+
+def iter_chunks(values, size=900):
+    values = list(values)
+    for i in range(0, len(values), size):
+        yield values[i:i + size]
+
+
+def parse_item_movimiento(item):
+    if not item:
+        return None, None
+    if ":" not in item:
+        return item, None
+    entidad, entidad_id = item.split(":", 1)
+    try:
+        return entidad, int(entidad_id)
+    except ValueError:
+        return entidad, None
+
+
+def insertar_archivos_lote(cur, rows):
+    insertados = []
+    for caja_id, numero, nombre, grupo_id, creado_por, tipo_doc in rows:
+        cur.execute(
+            "SELECT TOP 1 id FROM archivos WHERE grupo_id = %s AND numero = %s",
+            (grupo_id, numero)
+        )
+        if cur.fetchone():
+            continue
+        cur.execute(
+            """
+            INSERT INTO archivos (caja_id, numero, nombre, grupo_id, creado_por, tipo_doc)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (caja_id, numero, nombre, grupo_id, creado_por, tipo_doc)
+        )
+        archivo_id = cur.fetchone()[0]
+        insertados.append((archivo_id, numero, nombre, caja_id, tipo_doc))
+    return insertados
+
+
+def insertar_movimientos_lote(cur, rows):
+    for usuario_id, grupo_id, entidad, entidad_id, accion, datos_antes, datos_despues, meta in rows:
+        item = f"{entidad}:{entidad_id}" if entidad_id is not None else entidad
+        antes_texto = datos_antes if isinstance(datos_antes, str) else json_text(datos_antes) or ""
+        despues_base = datos_despues if isinstance(datos_despues, str) else json_text(datos_despues)
+        meta_texto = meta if isinstance(meta, str) else json_text(meta)
+        despues_texto = despues_base or meta_texto or ""
+        cur.execute(
+            """
+            INSERT INTO movimientos (
+                usuarioid, empresa, accion, antes, despues, item
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (usuario_id, grupo_id, accion, antes_texto, despues_texto, item)
+        )
 
 TIPO_DOC_OPCIONES = ("CC", "CE", "TI", "RC")
 
@@ -324,14 +417,7 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
                 app.logger.warning("Importacion Excel: sin filas validas")
                 return
 
-            sql = """
-                INSERT INTO archivos (caja_id, numero, nombre, grupo_id, creado_por, tipo_doc)
-                VALUES %s
-                ON CONFLICT (grupo_id, numero) DO NOTHING
-                RETURNING id, numero, nombre, caja_id, tipo_doc
-            """
-            execute_values(cur, sql, values, page_size=1000)
-            rows = cur.fetchall()
+            rows = insertar_archivos_lote(cur, values)
 
             if rows:
                 mov_values = [
@@ -342,19 +428,12 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
                         r[0],
                         "CREAR_ARCHIVO",
                         None,
-                        Json({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
+                        json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
                         None,
                     )
                     for r in rows
                 ]
-                mov_sql = """
-                    INSERT INTO movimientos (
-                        usuario_id, grupo_id, entidad, entidad_id, accion,
-                        datos_antes, datos_despues, meta
-                    )
-                    VALUES %s
-                """
-                execute_values(cur, mov_sql, mov_values, page_size=1000)
+                insertar_movimientos_lote(cur, mov_values)
 
             conn.commit()
         except Exception:
@@ -400,14 +479,10 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
             caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=usuario_id)
 
             values = [(n, f"Documento {n}", caja_id, usuario_id, grupo_id, "CC") for n in nums]
-            sql = """
-                INSERT INTO archivos (numero, nombre, caja_id, creado_por, grupo_id, tipo_doc)
-                VALUES %s
-                ON CONFLICT (grupo_id, numero) DO NOTHING
-                RETURNING id, numero, nombre, caja_id, tipo_doc
-            """
-            execute_values(cur, sql, values, page_size=1000)
-            rows = cur.fetchall()
+            rows = insertar_archivos_lote(
+                cur,
+                [(caja_id, n, f"Documento {n}", grupo_id, usuario_id, "CC") for n in nums]
+            )
 
             if rows:
                 mov_values = [
@@ -418,19 +493,12 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
                         r[0],
                         "CREAR_ARCHIVO",
                         None,
-                        Json({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
+                        json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
                         None,
                     )
                     for r in rows
                 ]
-                mov_sql = """
-                    INSERT INTO movimientos (
-                        usuario_id, grupo_id, entidad, entidad_id, accion,
-                        datos_antes, datos_despues, meta
-                    )
-                    VALUES %s
-                """
-                execute_values(cur, mov_sql, mov_values, page_size=1000)
+                insertar_movimientos_lote(cur, mov_values)
 
         conn.commit()
     except Exception:
@@ -498,10 +566,12 @@ def register():
         usuario = request.form["usuario"]
         password = request.form["password"]
 
-        # Intento de crear usuario (debe devolver True/False si usas el auth.py mejorado)
-        user_id = crear_usuario(usuario, password, rol="cliente")
+        try:
+            user_id = crear_usuario(usuario, password, rol="cliente")
+        except Exception as e:
+            app.logger.exception("Error creando usuario")
+            return render_template("register.html", error=f"Error al crear usuario: {e}")
 
-        # Si tu crear_usuario no devuelve nada (None), lo tratamos como Ã©xito
         if user_id is False:
             return render_template("register.html", error="El usuario ya existe")
 
@@ -651,13 +721,17 @@ def grupos():
                 if not usuario or not password:
                     flash("Usuario y contrasena son obligatorios.", "error")
                 else:
-                    user_id = crear_usuario(usuario, password, rol=rol)
-                    if user_id is False:
-                        flash("El usuario ya existe.", "error")
-                    else:
-                        grupo_id = crear_grupo(f"Personal - {usuario}", creado_por=user_id)
-                        agregar_usuario_a_grupo(user_id, grupo_id, puede_eliminar=True, puede_editar=True)
-                        flash("Usuario creado correctamente.", "success")
+                    try:
+                        user_id = crear_usuario(usuario, password, rol=rol)
+                        if user_id is False:
+                            flash("El usuario ya existe.", "error")
+                        else:
+                            grupo_id = crear_grupo(f"Personal - {usuario}", creado_por=user_id)
+                            agregar_usuario_a_grupo(user_id, grupo_id, puede_eliminar=True, puede_editar=True)
+                            flash("Usuario creado correctamente.", "success")
+                    except Exception as e:
+                        app.logger.exception("Error creando usuario desde grupos")
+                        flash(f"Error al crear usuario: {e}", "error")
 
             if accion == "actualizar_usuario":
                 usuario_id = int(request.form.get("usuario_id"))
@@ -685,9 +759,9 @@ def grupos():
 
                         cur.execute(
                             """
-                            UPDATE usuarios_grupos
-                            SET puede_eliminar = %s
-                            WHERE usuario_id = %s
+                            UPDATE usuariosempresas
+                            SET eliminar = %s
+                            WHERE usuarioid = %s
                             """,
                             ((nuevo_rol in ("admin", "supervisor")), usuario_id)
                         )
@@ -695,16 +769,16 @@ def grupos():
                     if nueva_password:
                         hash_pw = generate_password_hash(nueva_password)
                         cur.execute(
-                            "UPDATE usuarios SET password = %s WHERE id = %s",
+                            "UPDATE usuarios SET [contraseña] = %s WHERE id = %s",
                             (hash_pw, usuario_id)
                         )
 
                     cur.execute(
                         """
                         SELECT g.id, g.nombre
-                        FROM usuarios_grupos ug
-                        JOIN grupos g ON g.id = ug.grupo_id
-                        WHERE ug.usuario_id = %s
+                        FROM usuariosempresas ug
+                        JOIN empresas g ON g.id = ug.empresa
+                        WHERE ug.usuarioid = %s
                         ORDER BY g.id
                         LIMIT 1
                         """,
@@ -716,12 +790,20 @@ def grupos():
 
                     if nuevo_grupo_id == 0:
                         cur.execute(
-                            "DELETE FROM usuarios_grupos WHERE usuario_id = %s",
+                            "DELETE FROM usuariosempresas WHERE usuarioid = %s",
+                            (usuario_id,)
+                        )
+                        cur.execute(
+                            "DELETE FROM usuariosregistrados WHERE usuarioid = %s",
                             (usuario_id,)
                         )
                     elif current_group_id != nuevo_grupo_id:
                         cur.execute(
-                            "DELETE FROM usuarios_grupos WHERE usuario_id = %s",
+                            "DELETE FROM usuariosempresas WHERE usuarioid = %s",
+                            (usuario_id,)
+                        )
+                        cur.execute(
+                            "DELETE FROM usuariosregistrados WHERE usuarioid = %s",
                             (usuario_id,)
                         )
                         agregar_usuario_a_grupo(
@@ -734,6 +816,7 @@ def grupos():
                             eliminar_grupo_personal(usuario_id, nuevo_grupo_id)
 
                     conn.commit()
+                    sincronizar_registros_usuario(usuario_id)
                     flash("Usuario actualizado correctamente.", "success")
                 except Exception as e:
                     conn.rollback()
@@ -761,6 +844,8 @@ def grupos():
                     cur.execute("UPDATE grupos SET creado_por = NULL WHERE creado_por = %s", (usuario_id,))
                     cur.execute("UPDATE cajas SET creado_por = NULL WHERE creado_por = %s", (usuario_id,))
                     cur.execute("UPDATE archivos SET creado_por = NULL WHERE creado_por = %s", (usuario_id,))
+                    cur.execute("DELETE FROM usuariosempresas WHERE usuarioid = %s", (usuario_id,))
+                    cur.execute("DELETE FROM usuariosregistrados WHERE usuarioid = %s", (usuario_id,))
                     cur.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
                     conn.commit()
                 except Exception as e:
@@ -821,14 +906,14 @@ def grupos():
             SELECT
                 u.id,
                 u.usuario,
-                ug.puede_eliminar,
-                ug.puede_editar,
+                ug.eliminar,
+                ug.editar,
                 {fecha_expr} AS ultima_conexion
-            FROM usuarios_grupos ug
-            JOIN usuarios u ON u.id = ug.usuario_id
-            LEFT JOIN logs l ON l.usuario_id = u.id AND l.accion = 'LOGIN'
-            WHERE ug.grupo_id = %s
-            GROUP BY u.id, u.usuario, ug.puede_eliminar, ug.puede_editar
+            FROM usuariosempresas ug
+            JOIN usuarios u ON u.id = ug.usuarioid
+            LEFT JOIN auditoria l ON l.usuarioid = u.id AND l.accion = 'LOGIN'
+            WHERE ug.empresa = %s
+            GROUP BY u.id, u.usuario, ug.eliminar, ug.editar
             ORDER BY u.usuario
             """,
             (g[0],)
@@ -843,7 +928,7 @@ def grupos():
             )
             SELECT
                 c.id,
-                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_visible
+                CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_visible
             FROM cajas c
             LEFT JOIN ranked r ON r.id = c.id
             WHERE c.grupo_id = %s
@@ -875,15 +960,12 @@ def grupos():
                 SELECT
                     m.id,
                     m.fecha,
-                    m.entidad,
-                    m.entidad_id,
+                    m.item,
                     m.accion,
-                    m.datos_antes,
-                    m.datos_despues,
-                    a.numero
+                    m.antes,
+                    m.despues
                 FROM movimientos m
-                LEFT JOIN archivos a ON a.id = m.entidad_id AND m.entidad = 'archivo'
-                WHERE m.usuario_id = %s AND m.grupo_id = %s
+                WHERE m.usuarioid = %s AND m.empresa = %s
                 ORDER BY m.fecha DESC
                 LIMIT 20
                 """,
@@ -891,11 +973,12 @@ def grupos():
             )
             rows = cur.fetchall()
             movs = []
-            for mid, fecha, entidad, entidad_id, accion, antes_raw, despues_raw, numero in rows:
+            for mid, fecha, item_raw, accion, antes_raw, despues_raw in rows:
                 antes = _json_or_none(antes_raw) or {}
                 despues = _json_or_none(despues_raw) or {}
+                entidad, entidad_id = parse_item_movimiento(item_raw)
 
-                doc_num_raw = numero or antes.get("numero") or despues.get("numero")
+                doc_num_raw = antes.get("numero") or despues.get("numero")
                 doc_num = _fmt_num(doc_num_raw)
                 caja_old = antes.get("caja_id")
                 caja_new = despues.get("caja_id")
@@ -1113,7 +1196,7 @@ def cajas():
             c.rango_min,
             c.rango_max,
             CASE
-                WHEN c.is_pendiente THEN 0
+                WHEN c.is_pendiente = 1 THEN 0
                 ELSE r.caja_visible
             END AS caja_visible,
             c.is_pendiente
@@ -1123,7 +1206,7 @@ def cajas():
         WHERE c.grupo_id = %s
         GROUP BY c.id, c.rango_min, c.rango_max, c.is_pendiente, r.caja_visible
         ORDER BY
-            CASE WHEN c.is_pendiente THEN 1 ELSE 0 END,
+            CASE WHEN c.is_pendiente = 1 THEN 1 ELSE 0 END,
             caja_visible
         """,
         (grupo_id, grupo_id, grupo_id)
@@ -1343,7 +1426,7 @@ def archivos_legacy():
               WHERE grupo_id = %s AND is_pendiente = FALSE
           )
           SELECT
-              CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja,
+              CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja,
               a.tipo_doc AS tipo_doc,
               a.numero AS documento,
               a.nombre AS nombre
@@ -1374,7 +1457,7 @@ def archivos_legacy():
                     )
                       SELECT
                       c.id AS caja_id,
-                      CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                      CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
                       a.tipo_doc AS tipo_doc,
                       a.numero AS documento,
                       a.nombre AS nombre,
@@ -1384,11 +1467,11 @@ def archivos_legacy():
                     LEFT JOIN ranked r ON r.id = c.id
                     WHERE a.grupo_id = %s
                       AND (
-                        replace(to_char(a.numero, 'FM999G999G999G999G999'), ',', '.') = %s
+                        a.numero = %s
                         OR a.nombre ILIKE %s
                       )
                     ORDER BY a.numero
-                """, (grupo_id, grupo_id, buscar, buscar))
+                """, (grupo_id, grupo_id, doc, f"%{buscar}%"))
             else:
                 cur.execute("""
                     WITH ranked AS (
@@ -1398,7 +1481,7 @@ def archivos_legacy():
                     )
                       SELECT
                       c.id AS caja_id,
-                      CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                      CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
                       a.tipo_doc AS tipo_doc,
                       a.numero AS documento,
                       a.nombre AS nombre,
@@ -1416,7 +1499,7 @@ def archivos_legacy():
 
             rows = cur.fetchall()
             if rows:
-                resultado = rows
+                resultado = rows_to_builtin(rows)
             else:
                 resultado = ("no",)
         else:
@@ -1428,7 +1511,7 @@ def archivos_legacy():
                 )
                   SELECT
                   c.id AS caja_id,
-                  CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                  CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
                   a.tipo_doc AS tipo_doc,
                   a.numero AS documento,
                   a.nombre AS nombre,
@@ -1441,7 +1524,7 @@ def archivos_legacy():
             """, (grupo_id, f"%{buscar}%", grupo_id))
             rows = cur.fetchall()
             if rows:
-                resultado = rows
+                resultado = rows_to_builtin(rows)
             else:
                 resultado = ("no",)
 
@@ -1458,7 +1541,7 @@ def archivos_legacy():
         )
         SELECT
             c.id,
-            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_visible
+            CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_visible
         FROM cajas c
         LEFT JOIN ranked r ON r.id = c.id
         WHERE c.grupo_id = %s
@@ -1555,6 +1638,7 @@ def archivo():
         return redirect(url_for("grupos"))
 
     asegurar_caja_sin_asignar(grupo_id)
+    reparar_archivos_huerfanos(grupo_id)
 
     archivador_mode = admin_requerido() and es_archivador_grupo(grupo_id)
     view_mode = request.args.get("view", "").strip()
@@ -1768,16 +1852,17 @@ def archivo():
 
             conn = get_db()
             cur = conn.cursor()
+            in_clause, in_params = sqlserver_in_clause(selected_docs)
             cur.execute(
-                """
-                SELECT numero, nombre, pdf_path
+                f"""
+                SELECT id, numero, nombre, pdf_path
                 FROM archivos
                 WHERE grupo_id = %s
-                  AND numero = ANY(%s)
+                  AND id IN {in_clause}
                   AND pdf_path IS NOT NULL
                 ORDER BY numero
                 """,
-                (grupo_id, selected_docs)
+                (grupo_id, *in_params)
             )
             rows = cur.fetchall()
             cur.close()
@@ -1790,14 +1875,14 @@ def archivo():
             zip_buffer = BytesIO()
             agregados = 0
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for numero, nombre, pdf_path in rows:
+                for archivo_id, numero, nombre, pdf_path in rows:
                     abs_path = pdf_path
                     if not os.path.isabs(abs_path):
                         abs_path = os.path.join(app.config["UPLOAD_FOLDER"], abs_path)
                     if not os.path.exists(abs_path):
                         continue
                     safe_name = secure_filename(str(nombre or f"documento_{numero}")) or f"documento_{numero}"
-                    zip_file.write(abs_path, arcname=f"{numero}_{safe_name}.pdf")
+                    zip_file.write(abs_path, arcname=f"{numero}_{safe_name}_{archivo_id}.pdf")
                     agregados += 1
 
             if not agregados:
@@ -2149,7 +2234,7 @@ def archivo():
                         )
                     SELECT
                     c.id AS caja_id,
-                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                    CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
                     a.tipo_doc AS tipo_doc,
                     a.numero AS documento,
                     a.nombre AS nombre,
@@ -2159,11 +2244,11 @@ def archivo():
                         LEFT JOIN ranked r ON r.id = c.id
                         WHERE a.grupo_id = %s
                           AND (
-                            replace(to_char(a.numero, 'FM999G999G999G999G999'), ',', '.') = %s
+                            a.numero = %s
                             OR a.nombre ILIKE %s
                           )
                         ORDER BY a.numero
-                    """, (grupo_id, grupo_id, buscar_raw, buscar_raw))
+                    """, (grupo_id, grupo_id, doc, f"%{buscar_raw}%"))
                 else:
                     cur.execute("""
                         WITH ranked AS (
@@ -2173,7 +2258,7 @@ def archivo():
                         )
                     SELECT
                     c.id AS caja_id,
-                    CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                    CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
                     a.tipo_doc AS tipo_doc,
                     a.numero AS documento,
                     a.nombre AS nombre,
@@ -2191,7 +2276,7 @@ def archivo():
 
                 rows = cur.fetchall()
                 if rows:
-                    resultado = rows
+                    resultado = rows_to_builtin(rows)
                 else:
                     resultado = ("no",)
             else:
@@ -2203,7 +2288,7 @@ def archivo():
                     )
                 SELECT
                 c.id AS caja_id,
-                CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+                CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
                 a.tipo_doc AS tipo_doc,
                 a.numero AS documento,
                 a.nombre AS nombre,
@@ -2216,7 +2301,7 @@ def archivo():
                 """, (grupo_id, f"%{buscar_raw}%", grupo_id))
                 rows = cur.fetchall()
                 if rows:
-                    resultado = rows
+                    resultado = rows_to_builtin(rows)
                 else:
                     resultado = ("no",)
         finally:
@@ -2241,7 +2326,7 @@ def archivo():
         SELECT
             c.id,
             CASE
-            WHEN c.is_pendiente THEN 0
+            WHEN c.is_pendiente = 1 THEN 0
             ELSE r.caja_visible
             END AS caja_num,
             c.rango_min,
@@ -2252,7 +2337,7 @@ def archivo():
         LEFT JOIN conteo ct ON ct.caja_id = c.id
         LEFT JOIN ranked r ON r.id = c.id
         WHERE c.grupo_id = %s AND (c.is_pendiente = FALSE OR COALESCE(ct.total_archivos, 0) > 0)
-        ORDER BY CASE WHEN c.is_pendiente THEN 1 ELSE 0 END, c.rango_min, c.id
+        ORDER BY CASE WHEN c.is_pendiente = 1 THEN 1 ELSE 0 END, c.rango_min, c.id
     """, (grupo_id, grupo_id, grupo_id))
 
     cajas = cur.fetchall()
@@ -2261,11 +2346,11 @@ def archivo():
 
     cur.execute(
         """
-        SELECT a.caja_id, a.numero, a.nombre, a.tipo_doc
+        SELECT a.id, a.caja_id, a.numero, a.nombre, a.tipo_doc
         FROM archivos a
         WHERE a.grupo_id = %s
           AND a.pdf_path IS NOT NULL
-        ORDER BY a.caja_id, a.numero
+        ORDER BY a.caja_id, a.numero, a.id
         """,
         (grupo_id,)
     )
@@ -2275,8 +2360,9 @@ def archivo():
 
     pdf_bulk_data = []
     docs_by_box = {}
-    for caja_id, numero, nombre, tipo_doc in pdf_rows:
+    for archivo_id, caja_id, numero, nombre, tipo_doc in pdf_rows:
         docs_by_box.setdefault(caja_id, []).append({
+            "id": archivo_id,
             "numero": numero,
             "nombre": nombre,
             "tipo_doc": tipo_doc,
@@ -2313,6 +2399,7 @@ def archivo_caja(caja_id):
         return redirect(url_for("grupos"))
 
     asegurar_caja_sin_asignar(grupo_id)
+    reparar_archivos_huerfanos(grupo_id)
 
     # ======================
     # POST: Acciones en esta caja
@@ -2561,7 +2648,7 @@ def archivo_caja(caja_id):
         )
         SELECT
             c.id,
-            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+            CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
             c.rango_min,
             c.rango_max
         FROM cajas c
@@ -2654,21 +2741,26 @@ def archivo_duplicados():
             conn = get_db()
             cur = conn.cursor()
             try:
-                cur.execute(
-                    "SELECT id FROM archivos WHERE id = ANY(%s) AND grupo_id = %s",
-                    (ids, grupo_id)
-                )
-                rows = [r[0] for r in cur.fetchall()]
-                if len(rows) != len(ids):
+                rows = []
+                for chunk in iter_chunks(ids):
+                    in_clause, in_params = sqlserver_in_clause(chunk)
+                    cur.execute(
+                        f"SELECT id FROM archivos WHERE id IN {in_clause} AND grupo_id = %s",
+                        (*in_params, grupo_id)
+                    )
+                    rows.extend([r[0] for r in cur.fetchall()])
+                if len(set(rows)) != len(set(ids)):
                     flash("Seleccion invalida.", "error")
                     return redirect(url_for("archivo_duplicados"))
 
                 otros = [i for i in ids if i != base_id]
                 if otros:
-                    cur.execute(
-                        "DELETE FROM archivos WHERE id = ANY(%s) AND grupo_id = %s",
-                        (otros, grupo_id)
-                    )
+                    for chunk in iter_chunks(otros):
+                        in_clause, in_params = sqlserver_in_clause(chunk)
+                        cur.execute(
+                            f"DELETE FROM archivos WHERE id IN {in_clause} AND grupo_id = %s",
+                            (*in_params, grupo_id)
+                        )
 
                 cur.execute(
                     """
@@ -2806,17 +2898,6 @@ def admin_logs():
     conn = get_db()
     cur = conn.cursor()
 
-    def obtener_columnas(cur_local, tabla):
-        cur_local.execute(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = %s
-            """,
-            (tabla,)
-        )
-        return {r[0] for r in cur_local.fetchall()}
-
     registros = []
     movimientos = []
     usuarios = []
@@ -2825,32 +2906,18 @@ def admin_logs():
     movimientos_por_grupo = defaultdict(list)
 
     try:
-        log_cols = obtener_columnas(cur, "logs")
-        if "fecha" in log_cols:
-            fecha_expr = "l.fecha"
-        elif "creado_en" in log_cols:
-            fecha_expr = "l.creado_en"
-        elif "created_at" in log_cols:
-            fecha_expr = "l.created_at"
-        else:
-            fecha_expr = "NULL"
-
-        if "ip" in log_cols:
-            ip_expr = "l.ip"
-        elif "ip_address" in log_cols:
-            ip_expr = "l.ip_address"
-        else:
-            ip_expr = "NULL"
-
-        order_expr = fecha_expr if fecha_expr != "NULL" else "l.id"
-
-        cur.execute(f"""
-            SELECT COALESCE(u.usuario, '[eliminado]') AS usuario,
-                   l.accion, {fecha_expr} AS fecha, {ip_expr} AS ip, g.nombre, l.grupo_id
-            FROM logs l
-            LEFT JOIN usuarios u ON u.id = l.usuario_id
-            LEFT JOIN grupos g ON g.id = l.grupo_id
-            ORDER BY {order_expr} DESC
+        cur.execute("""
+            SELECT
+                COALESCE(u.usuario, '[eliminado]') AS usuario,
+                a.accion,
+                a.fecha,
+                a.direccionip,
+                e.nombre,
+                a.empresa
+            FROM auditoria a
+            LEFT JOIN usuarios u ON u.id = a.usuarioid
+            LEFT JOIN empresas e ON e.id = a.empresa
+            ORDER BY a.fecha DESC
             LIMIT 200
         """)
         registros = cur.fetchall()
@@ -2868,16 +2935,15 @@ def admin_logs():
                 m.id,
                 m.fecha,
                 COALESCE(u.usuario, '[eliminado]') AS usuario,
-                g.nombre,
-                m.entidad,
+                e.nombre,
+                m.item,
                 m.accion,
-                m.datos_antes,
-                m.datos_despues,
-                m.grupo_id,
-                m.entidad_id
+                m.antes,
+                m.despues,
+                m.empresa
             FROM movimientos m
-            LEFT JOIN usuarios u ON u.id = m.usuario_id
-            LEFT JOIN grupos g ON g.id = m.grupo_id
+            LEFT JOIN usuarios u ON u.id = m.usuarioid
+            LEFT JOIN empresas e ON e.id = m.empresa
             ORDER BY m.fecha DESC
             LIMIT 200
         """)
@@ -2896,21 +2962,44 @@ def admin_logs():
                 u.id,
                 u.usuario,
                 u.rol,
-                u.creado_en,
-                COALESCE(string_agg(g.nombre, ', ' ORDER BY g.nombre), 'Sin grupo') AS grupos,
-                COALESCE(array_agg(g.id ORDER BY g.id), ARRAY[]::integer[]) AS grupo_ids
+                ur.fecha,
+                ur.empresa,
+                ur.nombreempresa
             FROM usuarios u
-            LEFT JOIN usuarios_grupos ug ON ug.usuario_id = u.id
-            LEFT JOIN grupos g ON g.id = ug.grupo_id AND g.archivado = FALSE
-            GROUP BY u.id, u.usuario, u.rol, u.creado_en
-            ORDER BY u.creado_en DESC
+            LEFT JOIN usuariosregistrados ur ON ur.usuarioid = u.id
+            ORDER BY COALESCE(ur.fecha, SYSDATETIME()) DESC, ur.nombreempresa, u.usuario
         """)
-        usuarios = cur.fetchall()
+        usuario_rows = cur.fetchall()
+        agrupados = {}
+        for user_id, usuario, rol, creado_en, grupo_id_item, grupo_nombre in usuario_rows:
+            if user_id not in agrupados:
+                agrupados[user_id] = {
+                    "id": user_id,
+                    "usuario": usuario,
+                    "rol": rol,
+                    "creado_en": creado_en or datetime.now(),
+                    "grupos": [],
+                    "grupo_ids": [],
+                }
+            if grupo_id_item is not None:
+                agrupados[user_id]["grupos"].append(grupo_nombre)
+                agrupados[user_id]["grupo_ids"].append(grupo_id_item)
+        usuarios = [
+            (
+                data["id"],
+                data["usuario"],
+                data["rol"],
+                data["creado_en"],
+                ", ".join(data["grupos"]) if data["grupos"] else "Sin grupo",
+                data["grupo_ids"],
+            )
+            for data in agrupados.values()
+        ]
 
         cur.execute("""
             SELECT id, nombre
-            FROM grupos
-            WHERE archivado = FALSE
+            FROM empresas
+            WHERE archivado = 0 OR archivado IS NULL
             ORDER BY nombre
         """)
         grupos_todos = cur.fetchall()
@@ -2975,7 +3064,7 @@ def deshacer_movimiento(mov_id):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT entidad, accion, datos_antes, datos_despues, grupo_id, entidad_id
+        SELECT item, accion, antes, despues, empresa
         FROM movimientos
         WHERE id = %s
     """, (mov_id,))
@@ -2987,7 +3076,10 @@ def deshacer_movimiento(mov_id):
         flash("Movimiento no encontrado.", "error")
         return redirect(url_for("admin_movimientos"))
 
-    entidad, accion, datos_antes, datos_despues, grupo_id, entidad_id = row
+    item, accion, datos_antes, datos_despues, grupo_id = row
+    entidad, entidad_id = parse_item_movimiento(item)
+    datos_antes = json_or_none(datos_antes)
+    datos_despues = json_or_none(datos_despues)
 
     try:
         if entidad == "archivo":
@@ -2997,23 +3089,26 @@ def deshacer_movimiento(mov_id):
                     (entidad_id, grupo_id)
                 )
             elif accion == "ELIMINAR_ARCHIVO" and datos_antes:
-                cur.execute(
-                    """
-                    INSERT INTO archivos (id, numero, nombre, caja_id, pdf_path, grupo_id, creado_por, tipo_doc)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    (
-                        datos_antes.get("id"),
-                        datos_antes.get("numero"),
-                        datos_antes.get("nombre"),
-                        datos_antes.get("caja_id"),
-                        datos_antes.get("pdf_path"),
-                        grupo_id,
-                        None,
-                        datos_antes.get("tipo_doc") or "CC",
+                cur.execute("SELECT 1 FROM archivos WHERE id = %s", (datos_antes.get("id"),))
+                if not cur.fetchone():
+                    insert_with_identity(
+                        cur,
+                        "archivos",
+                        """
+                        INSERT INTO archivos (id, numero, nombre, caja_id, pdf_path, grupo_id, creado_por, tipo_doc)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            datos_antes.get("id"),
+                            datos_antes.get("numero"),
+                            datos_antes.get("nombre"),
+                            datos_antes.get("caja_id"),
+                            datos_antes.get("pdf_path"),
+                            grupo_id,
+                            None,
+                            datos_antes.get("tipo_doc") or "CC",
+                        )
                     )
-                )
             elif accion == "ARCHIVO_MOVER" and datos_antes:
                 cur.execute(
                     "UPDATE archivos SET caja_id = %s WHERE id = %s AND grupo_id = %s",
@@ -3043,19 +3138,22 @@ def deshacer_movimiento(mov_id):
                     (entidad_id, grupo_id)
                 )
             elif accion == "ELIMINAR_CAJA" and datos_antes:
-                cur.execute(
-                    """
-                    INSERT INTO cajas (id, rango_min, rango_max, grupo_id, is_pendiente)
-                    VALUES (%s, %s, %s, %s, FALSE)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    (
-                        entidad_id,
-                        datos_antes.get("rango_min"),
-                        datos_antes.get("rango_max"),
-                        grupo_id,
+                cur.execute("SELECT 1 FROM cajas WHERE id = %s", (entidad_id,))
+                if not cur.fetchone():
+                    insert_with_identity(
+                        cur,
+                        "cajas",
+                        """
+                        INSERT INTO cajas (id, rango_min, rango_max, grupo_id, is_pendiente)
+                        VALUES (%s, %s, %s, %s, 0)
+                        """,
+                        (
+                            entidad_id,
+                            datos_antes.get("rango_min"),
+                            datos_antes.get("rango_max"),
+                            grupo_id,
+                        )
                     )
-                )
             elif accion == "MODIFICAR_CAJA" and datos_antes:
                 cur.execute(
                     """
@@ -3251,10 +3349,12 @@ def archivador_eliminar():
 
     # Eliminar archivos sueltos (que no esten en cajas seleccionadas)
     if archivos_ids:
-        cur.execute(
-            "DELETE FROM archivos WHERE id = ANY(%s) AND grupo_id = %s",
-            (archivos_ids, grupo_id)
-        )
+        for chunk in iter_chunks(archivos_ids):
+            in_clause, in_params = sqlserver_in_clause(chunk)
+            cur.execute(
+                f"DELETE FROM archivos WHERE id IN {in_clause} AND grupo_id = %s",
+                (*in_params, grupo_id)
+            )
 
     # Eliminar cajas y sus archivos
     for caja_id in cajas_ids:
@@ -3322,7 +3422,7 @@ def export_excel():
             WHERE grupo_id = %s AND is_pendiente = FALSE
         )
         SELECT
-            CASE WHEN c.is_pendiente THEN 0 ELSE r.caja_visible END AS caja_num,
+            CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
             a.numero,
             a.nombre,
             CASE WHEN a.pdf_path IS NULL OR a.pdf_path = '' THEN 'No' ELSE 'Si' END AS pdf

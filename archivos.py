@@ -5,12 +5,12 @@ from historial import registrar_movimiento
 def _buscar_caja_para_numero(cur, numero, grupo_id):
     cur.execute(
         """
-        SELECT id
+        SELECT TOP 1 id
         FROM cajas
         WHERE grupo_id = %s
-          AND is_pendiente = FALSE
+          AND is_pendiente = 0
           AND %s BETWEEN rango_min AND rango_max
-        LIMIT 1
+        ORDER BY rango_min, id
         """,
         (grupo_id, numero)
     )

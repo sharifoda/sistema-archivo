@@ -1,4 +1,4 @@
-from psycopg2.extras import Json
+import json
 from db import get_db
 
 
@@ -17,30 +17,29 @@ def registrar_movimiento(
 
     conn = get_db()
     cur = conn.cursor()
+    item = f"{entidad}:{entidad_id}" if entidad_id is not None else entidad
+    antes_texto = json.dumps(datos_antes, ensure_ascii=False) if datos_antes is not None else ""
+    despues_texto = json.dumps(datos_despues, ensure_ascii=False) if datos_despues is not None else ""
 
     cur.execute(
         """
         INSERT INTO movimientos (
-            usuario_id,
-            grupo_id,
-            entidad,
-            entidad_id,
+            usuarioid,
+            empresa,
             accion,
-            datos_antes,
-            datos_despues,
-            meta
+            antes,
+            despues,
+            item
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
         (
             usuario_id,
             grupo_id,
-            entidad,
-            entidad_id,
             accion,
-            Json(datos_antes) if datos_antes is not None else None,
-            Json(datos_despues) if datos_despues is not None else None,
-            Json(meta) if meta is not None else None,
+            antes_texto,
+            despues_texto if despues_texto else (json.dumps(meta, ensure_ascii=False) if meta is not None else ""),
+            item,
         )
     )
 

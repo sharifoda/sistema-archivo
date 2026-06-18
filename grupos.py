@@ -1,6 +1,106 @@
 from db import get_db
 
 
+def _sincronizar_usuario_registrado(cur, usuario_id, grupo_id):
+    cur.execute(
+        """
+        MERGE usuariosregistrados AS target
+        USING (
+            SELECT
+                u.id AS usuarioid,
+                e.id AS empresa,
+                u.rol AS rol,
+                u.usuario AS nombreusuario,
+                e.nombre AS nombreempresa
+            FROM usuarios u
+            JOIN empresas e ON e.id = %s
+            WHERE u.id = %s
+        ) AS source
+        ON target.usuarioid = source.usuarioid AND target.empresa = source.empresa
+        WHEN MATCHED THEN
+            UPDATE SET
+                rol = source.rol,
+                nombreusuario = source.nombreusuario,
+                nombreempresa = source.nombreempresa
+        WHEN NOT MATCHED THEN
+            INSERT (usuarioid, empresa, rol, fecha, nombreusuario, nombreempresa)
+            VALUES (
+                source.usuarioid,
+                source.empresa,
+                source.rol,
+                SYSDATETIME(),
+                source.nombreusuario,
+                source.nombreempresa
+            );
+        """,
+        (grupo_id, usuario_id)
+    )
+
+
+def sincronizar_registros_usuario(usuario_id):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        UPDATE ur
+        SET
+            rol = u.rol,
+            nombreusuario = u.usuario,
+            nombreempresa = e.nombre
+        FROM usuariosregistrados ur
+        JOIN usuarios u ON u.id = ur.usuarioid
+        JOIN empresas e ON e.id = ur.empresa
+        WHERE ur.usuarioid = %s
+        """,
+        (usuario_id,)
+    )
+
+    cur.execute(
+        """
+        INSERT INTO usuariosregistrados (usuarioid, empresa, rol, fecha, nombreusuario, nombreempresa)
+        SELECT
+            u.id,
+            e.id,
+            u.rol,
+            SYSDATETIME(),
+            u.usuario,
+            e.nombre
+        FROM usuariosempresas ue
+        JOIN usuarios u ON u.id = ue.usuarioid
+        JOIN empresas e ON e.id = ue.empresa
+        WHERE ue.usuarioid = %s
+          AND NOT EXISTS (
+              SELECT 1
+              FROM usuariosregistrados ur
+              WHERE ur.usuarioid = ue.usuarioid AND ur.empresa = ue.empresa
+          )
+        """,
+        (usuario_id,)
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def eliminar_registros_usuario(usuario_id, grupo_id=None):
+    conn = get_db()
+    cur = conn.cursor()
+
+    if grupo_id is None:
+        cur.execute("DELETE FROM usuariosregistrados WHERE usuarioid = %s", (usuario_id,))
+    else:
+        cur.execute(
+            "DELETE FROM usuariosregistrados WHERE usuarioid = %s AND empresa = %s",
+            (usuario_id, grupo_id)
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 def crear_grupo(nombre, creado_por=None):
     conn = get_db()
     cur = conn.cursor()
@@ -24,14 +124,21 @@ def agregar_usuario_a_grupo(usuario_id, grupo_id, puede_eliminar=False, puede_ed
 
     cur.execute(
         """
-        INSERT INTO usuarios_grupos (usuario_id, grupo_id, puede_eliminar, puede_editar)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (usuario_id, grupo_id)
-        DO UPDATE SET puede_eliminar = EXCLUDED.puede_eliminar,
-                      puede_editar = EXCLUDED.puede_editar
+        MERGE usuariosempresas AS target
+        USING (SELECT %s AS usuarioid, %s AS empresa, %s AS eliminar, %s AS editar) AS source
+        ON target.usuarioid = source.usuarioid AND target.empresa = source.empresa
+        WHEN MATCHED THEN
+            UPDATE SET
+                eliminar = source.eliminar,
+                editar = source.editar
+        WHEN NOT MATCHED THEN
+            INSERT (usuarioid, empresa, eliminar, editar)
+            VALUES (source.usuarioid, source.empresa, source.eliminar, source.editar);
         """,
         (usuario_id, grupo_id, puede_eliminar, puede_editar)
     )
+
+    _sincronizar_usuario_registrado(cur, usuario_id, grupo_id)
 
     conn.commit()
     cur.close()
@@ -44,11 +151,11 @@ def obtener_grupos_usuario(usuario_id):
 
     cur.execute(
         """
-        SELECT g.id, g.nombre, ug.puede_eliminar, ug.puede_editar
-        FROM usuarios_grupos ug
-        JOIN grupos g ON g.id = ug.grupo_id
-        WHERE ug.usuario_id = %s AND g.archivado = FALSE
-        ORDER BY g.nombre
+        SELECT e.id, e.nombre, ue.eliminar, ue.editar
+        FROM usuariosempresas ue
+        JOIN empresas e ON e.id = ue.empresa
+        WHERE ue.usuarioid = %s AND (e.archivado = 0 OR e.archivado IS NULL)
+        ORDER BY e.nombre
         """,
         (usuario_id,)
     )
@@ -64,7 +171,7 @@ def obtener_todos_grupos():
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT id, nombre FROM grupos WHERE archivado = FALSE ORDER BY nombre")
+    cur.execute("SELECT id, nombre FROM grupos WHERE archivado = 0 ORDER BY nombre")
     rows = cur.fetchall()
 
     cur.close()
@@ -79,9 +186,9 @@ def usuario_puede_eliminar(usuario_id, grupo_id):
 
     cur.execute(
         """
-        SELECT puede_eliminar
-        FROM usuarios_grupos
-        WHERE usuario_id = %s AND grupo_id = %s
+        SELECT eliminar
+        FROM usuariosempresas
+        WHERE usuarioid = %s AND empresa = %s
         """,
         (usuario_id, grupo_id)
     )
@@ -99,10 +206,10 @@ def obtener_miembros_grupo(grupo_id):
 
     cur.execute(
         """
-        SELECT u.id, u.usuario, u.rol, ug.puede_eliminar, ug.puede_editar
-        FROM usuarios_grupos ug
-        JOIN usuarios u ON u.id = ug.usuario_id
-        WHERE ug.grupo_id = %s
+        SELECT u.id, u.usuario, u.rol, ue.eliminar, ue.editar
+        FROM usuariosempresas ue
+        JOIN usuarios u ON u.id = ue.usuarioid
+        WHERE ue.empresa = %s
         ORDER BY u.usuario
         """,
         (grupo_id,)
@@ -136,12 +243,16 @@ def quitar_usuario_de_grupo(usuario_id, grupo_id):
     cur = conn.cursor()
 
     cur.execute(
-        "DELETE FROM usuarios_grupos WHERE usuario_id = %s AND grupo_id = %s",
+        "DELETE FROM usuariosempresas WHERE usuarioid = %s AND empresa = %s",
+        (usuario_id, grupo_id)
+    )
+    cur.execute(
+        "DELETE FROM usuariosregistrados WHERE usuarioid = %s AND empresa = %s",
         (usuario_id, grupo_id)
     )
 
     cur.execute(
-        "SELECT COUNT(*) FROM usuarios_grupos WHERE usuario_id = %s",
+        "SELECT COUNT(*) FROM usuariosempresas WHERE usuarioid = %s",
         (usuario_id,)
     )
     count = cur.fetchone()[0]
@@ -167,12 +278,19 @@ def quitar_usuario_de_grupo(usuario_id, grupo_id):
 
             cur.execute(
                 """
-                INSERT INTO usuarios_grupos (usuario_id, grupo_id, puede_eliminar, puede_editar)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (usuario_id, grupo_id) DO NOTHING
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM usuariosempresas
+                    WHERE usuarioid = %s AND empresa = %s
+                )
+                BEGIN
+                    INSERT INTO usuariosempresas (usuarioid, empresa, eliminar, editar)
+                    VALUES (%s, %s, %s, %s)
+                END
                 """,
-                (usuario_id, personal_id, True, True)
+                (usuario_id, personal_id, usuario_id, personal_id, True, True)
             )
+            _sincronizar_usuario_registrado(cur, usuario_id, personal_id)
 
     conn.commit()
     cur.close()
@@ -208,7 +326,7 @@ def eliminar_grupo_personal(usuario_id, target_group_id):
         return
 
     cur.execute(
-        "SELECT COUNT(*) FROM usuarios_grupos WHERE grupo_id = %s",
+        "SELECT COUNT(*) FROM usuariosempresas WHERE empresa = %s",
         (personal_id,)
     )
     count = cur.fetchone()[0]
@@ -226,7 +344,7 @@ def eliminar_grupo_personal(usuario_id, target_group_id):
             cur.execute(
                 """
                 INSERT INTO cajas (rango_min, rango_max, creado_por, grupo_id, is_pendiente)
-                VALUES (%s, %s, %s, %s, TRUE)
+                VALUES (%s, %s, %s, %s, 1)
                 RETURNING id
                 """,
                 (-1, -1, None, target_group_id)
@@ -242,13 +360,12 @@ def eliminar_grupo_personal(usuario_id, target_group_id):
         for archivo_id, numero in archivos:
             cur.execute(
                 """
-                SELECT id
+                SELECT TOP 1 id
                 FROM cajas
                 WHERE grupo_id = %s
-                  AND is_pendiente = FALSE
+                  AND is_pendiente = 0
                   AND %s BETWEEN rango_min AND rango_max
                 ORDER BY rango_min, id
-                LIMIT 1
                 """,
                 (target_group_id, numero)
             )
@@ -278,7 +395,7 @@ def eliminar_grupo_personal(usuario_id, target_group_id):
         # Borrar cajas del grupo personal y archivar el grupo
         cur.execute("DELETE FROM cajas WHERE grupo_id = %s", (personal_id,))
         cur.execute(
-            "UPDATE grupos SET archivado = TRUE, archivado_en = NOW() WHERE id = %s",
+            "UPDATE grupos SET archivado = 1, archivado_en = SYSDATETIME() WHERE id = %s",
             (personal_id,)
         )
         conn.commit()
@@ -310,7 +427,7 @@ def archivar_grupo(grupo_id, admin_user_id):
         arch_id = cur.fetchone()[0]
 
     cur.execute(
-        "SELECT id FROM cajas WHERE grupo_id = %s AND is_pendiente = TRUE",
+        "SELECT id FROM cajas WHERE grupo_id = %s AND is_pendiente = 1",
         (arch_id,)
     )
     row = cur.fetchone()
@@ -320,7 +437,7 @@ def archivar_grupo(grupo_id, admin_user_id):
         cur.execute(
             """
             INSERT INTO cajas (rango_min, rango_max, creado_por, grupo_id, is_pendiente)
-            VALUES (%s, %s, %s, %s, TRUE)
+            VALUES (%s, %s, %s, %s, 1)
             RETURNING id
             """,
             (-1, -1, admin_user_id, arch_id)
@@ -372,9 +489,10 @@ def archivar_grupo(grupo_id, admin_user_id):
     )
 
     # Quitar membresías y archivar el grupo
-    cur.execute("DELETE FROM usuarios_grupos WHERE grupo_id = %s", (grupo_id,))
+    cur.execute("DELETE FROM usuariosempresas WHERE empresa = %s", (grupo_id,))
+    cur.execute("DELETE FROM usuariosregistrados WHERE empresa = %s", (grupo_id,))
     cur.execute(
-        "UPDATE grupos SET archivado = TRUE, archivado_en = NOW() WHERE id = %s",
+        "UPDATE grupos SET archivado = 1, archivado_en = SYSDATETIME() WHERE id = %s",
         (grupo_id,)
     )
 

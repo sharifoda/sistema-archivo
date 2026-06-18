@@ -4,7 +4,7 @@ from historial import registrar_movimiento
 
 def _get_caja_pendiente_id(cur, grupo_id):
     cur.execute(
-        "SELECT id FROM cajas WHERE grupo_id = %s AND is_pendiente = TRUE",
+        "SELECT id FROM cajas WHERE grupo_id = %s AND is_pendiente = 1",
         (grupo_id,)
     )
     row = cur.fetchone()
@@ -18,7 +18,7 @@ def crear_caja(rango_min, rango_max, grupo_id, creado_por=None):
     cur.execute(
         """
         INSERT INTO cajas (rango_min, rango_max, creado_por, grupo_id, is_pendiente)
-        VALUES (%s, %s, %s, %s, FALSE)
+        VALUES (%s, %s, %s, %s, 0)
         RETURNING id
         """,
         (rango_min, rango_max, creado_por, grupo_id)
@@ -56,7 +56,7 @@ def asegurar_caja_sin_asignar(grupo_id):
         cur.execute(
             """
             INSERT INTO cajas (rango_min, rango_max, creado_por, grupo_id, is_pendiente)
-            VALUES (%s, %s, %s, %s, TRUE)
+            VALUES (%s, %s, %s, %s, 1)
             RETURNING id
             """,
             (-1, -1, None, grupo_id)
@@ -67,6 +67,48 @@ def asegurar_caja_sin_asignar(grupo_id):
     cur.close()
     conn.close()
     return pendiente_id
+
+
+def reparar_archivos_huerfanos(grupo_id):
+    """
+    Reasigna a la caja pendiente los archivos cuya caja no existe
+    o pertenece a otra empresa/grupo.
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    pendiente_id = _get_caja_pendiente_id(cur, grupo_id)
+    if pendiente_id is None:
+        cur.execute(
+            """
+            INSERT INTO cajas (rango_min, rango_max, creado_por, grupo_id, is_pendiente)
+            VALUES (%s, %s, %s, %s, 1)
+            RETURNING id
+            """,
+            (-1, -1, None, grupo_id)
+        )
+        pendiente_id = cur.fetchone()[0]
+
+    cur.execute(
+        """
+        UPDATE archivos
+        SET caja_id = %s
+        WHERE grupo_id = %s
+          AND NOT EXISTS (
+              SELECT 1
+              FROM cajas c
+              WHERE c.id = archivos.caja_id
+                AND c.grupo_id = %s
+          )
+        """,
+        (pendiente_id, grupo_id, grupo_id)
+    )
+
+    afectados = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return afectados
 
 
 def reubicar_archivos_pendientes_por_nueva_caja(caja_id, grupo_id, usuario_id=None):
@@ -214,14 +256,13 @@ def reubicar_archivos_de_caja(caja_id, grupo_id, usuario_id=None):
     for archivo_id, numero in fuera:
         cur.execute(
             """
-            SELECT id
+            SELECT TOP 1 id
             FROM cajas
             WHERE id <> %s
               AND grupo_id = %s
-              AND is_pendiente = FALSE
+              AND is_pendiente = 0
               AND %s BETWEEN rango_min AND rango_max
             ORDER BY rango_min, id
-            LIMIT 1
             """,
             (caja_id, grupo_id, numero)
         )
@@ -274,14 +315,13 @@ def eliminar_caja(caja_id, grupo_id, usuario_id=None):
     for archivo_id, numero in archivos:
         cur.execute(
             """
-            SELECT id
+            SELECT TOP 1 id
             FROM cajas
             WHERE id <> %s
               AND grupo_id = %s
-              AND is_pendiente = FALSE
+              AND is_pendiente = 0
               AND %s BETWEEN rango_min AND rango_max
             ORDER BY rango_min, id
-            LIMIT 1
             """,
             (caja_id, grupo_id, numero)
         )

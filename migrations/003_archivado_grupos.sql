@@ -1,6 +1,17 @@
-BEGIN;
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
 
-ALTER TABLE grupos ADD COLUMN IF NOT EXISTS archivado BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE grupos ADD COLUMN IF NOT EXISTS archivado_en TIMESTAMP;
+IF COL_LENGTH('dbo.grupos', 'archivado') IS NULL
+BEGIN
+    ALTER TABLE dbo.grupos
+    ADD archivado BIT NOT NULL
+        CONSTRAINT DF_grupos_archivado DEFAULT (0);
+END;
 
-COMMIT;
+IF COL_LENGTH('dbo.grupos', 'archivado_en') IS NULL
+BEGIN
+    ALTER TABLE dbo.grupos
+    ADD archivado_en DATETIME2 NULL;
+END;
+
+COMMIT TRANSACTION;

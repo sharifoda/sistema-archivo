@@ -1,5 +1,6 @@
 from db import get_db
 
+
 def registrar_log(usuario_id, accion, ip=None, grupo_id=None):
     """
     Guarda un log en la tabla logs.
@@ -14,7 +15,10 @@ def registrar_log(usuario_id, accion, ip=None, grupo_id=None):
     cur = conn.cursor()
 
     cur.execute(
-        "INSERT INTO logs (usuario_id, accion, ip, grupo_id) VALUES (%s, %s, %s, %s)",
+        """
+        INSERT INTO auditoria (usuarioid, accion, direccionip, empresa)
+        VALUES (%s, %s, %s, %s)
+        """,
         (usuario_id, accion, ip, grupo_id)
     )
 

@@ -210,7 +210,7 @@ function renderBulkPdfBoxes() {
 
   list.innerHTML = BULK_PDF.boxes
     .map((box) => {
-      const selectedInBox = box.docs.filter((doc) => BULK_PDF.selectedDocs.has(String(doc.numero))).length;
+      const selectedInBox = box.docs.filter((doc) => BULK_PDF.selectedDocs.has(String(doc.id))).length;
       return `
         <label class="bulk-box-item ${box.id === BULK_PDF.activeBoxId ? "active" : ""}" onclick="setActiveBulkBox(${box.id})">
           <div class="bulk-box-copy">
@@ -246,14 +246,14 @@ function renderBulkPdfDocs() {
   title.textContent = `Caja ${box.numero}`;
   list.innerHTML = box.docs
     .map((doc) => {
-      const checked = BULK_PDF.selectedDocs.has(String(doc.numero)) ? "checked" : "";
+      const checked = BULK_PDF.selectedDocs.has(String(doc.id)) ? "checked" : "";
       return `
         <label class="bulk-doc-item">
           <div class="bulk-doc-copy">
             <strong>${formatMiles(doc.numero)}${doc.tipo_doc ? " · " + doc.tipo_doc : ""}</strong>
             <span>${String(doc.nombre || "").toUpperCase()}</span>
           </div>
-          <input type="checkbox" ${checked} onchange="toggleBulkDoc('${doc.numero}', this.checked)">
+          <input type="checkbox" ${checked} onchange="toggleBulkDoc('${doc.id}', this.checked)">
         </label>
       `;
     })
@@ -262,11 +262,11 @@ function renderBulkPdfDocs() {
   updateBulkSummary();
 }
 
-function toggleBulkDoc(numero, checked) {
+function toggleBulkDoc(docId, checked) {
   if (checked) {
-    BULK_PDF.selectedDocs.add(String(numero));
+    BULK_PDF.selectedDocs.add(String(docId));
   } else {
-    BULK_PDF.selectedDocs.delete(String(numero));
+    BULK_PDF.selectedDocs.delete(String(docId));
   }
   renderBulkPdfBoxes();
 }
@@ -279,14 +279,14 @@ function toggleBulkBox(boxId, checked) {
 function seleccionarTodosCajaActiva() {
   const box = getBulkBox(BULK_PDF.activeBoxId);
   if (!box) return;
-  box.docs.forEach((doc) => BULK_PDF.selectedDocs.add(String(doc.numero)));
+  box.docs.forEach((doc) => BULK_PDF.selectedDocs.add(String(doc.id)));
   renderBulkPdfBoxes();
 }
 
 function limpiarCajaActiva() {
   const box = getBulkBox(BULK_PDF.activeBoxId);
   if (!box) return;
-  box.docs.forEach((doc) => BULK_PDF.selectedDocs.delete(String(doc.numero)));
+  box.docs.forEach((doc) => BULK_PDF.selectedDocs.delete(String(doc.id)));
   renderBulkPdfBoxes();
 }
 

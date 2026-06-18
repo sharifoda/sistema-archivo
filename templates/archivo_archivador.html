@@ -20,19 +20,45 @@
   .box-title{ font-weight:bold; }
   .btn-primary{ background:#e8f1ff; border:2px solid #1f5ca8; color:#1f5ca8; padding:6px 10px; }
   .btn-danger{ background:#ffe9e9; border:2px solid #b00020; color:#b00020; padding:6px 10px; }
-  .archivador-table{ width:100%; border-collapse:collapse; margin-top:8px; }
+  .archivador-table{ width:100%; border-collapse:collapse; margin-top:8px; table-layout:fixed; }
   .archivador-table th, .archivador-table td{ border:1px solid #bbb; padding:8px; }
-  .archivador-table th{ position:sticky; top:42px; background:#f7f7f7; }
+  .archivador-table th{ position:static; background:#f7f7f7; }
   .archivador-table tr:nth-child(even) td{ background:#f7f7f7; }
   .archivador-table th, .archivador-table td{ white-space:nowrap; }
   .archivador-table .col-actions{ text-align:right; width:1%; }
   .archivador-table .col-origen{ text-align:left; }
   .archivador-table th.col-origen{ text-align:center; }
-  .archivador-table .col-select{ width:1%; }
-  .archivador-table .col-doc{ width:1%; }
-  .archivador-table .col-name{ width:1%; }
-  .archivador-table .col-pdf{ width:1%; }
-  .archivador-table .col-origen{ width:1%; }
+  .archivador-table .col-select{
+    width: 220px !important;
+    min-width: 220px !important;
+  }
+  .archivador-table th.col-select{
+    width: 220px !important;
+    min-width: 220px !important;
+  }
+  .select-all-head{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    justify-content:flex-start;
+    white-space:nowrap;
+  }
+  .select-all-head input[type="checkbox"]{
+    margin:0;
+    flex:0 0 auto;
+  }
+  .select-all-head span{
+    display:inline-block;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .archivador-table td.col-select{
+    text-align:center;
+  }
+  .archivador-table .col-doc{ width: 160px; }
+  .archivador-table .col-name{ width:auto; }
+  .archivador-table .col-pdf{ width: 120px; }
+  .archivador-table .col-origen{ width: 180px; }
   .muted{ color:#666; font-size:12px; }
   .modal-overlay{
     display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
@@ -88,9 +114,11 @@
       <table class="archivador-table">
         <tr>
           <th class="col-select">
-            <input type="checkbox" class="chk-caja-archivos" data-caja-id="{{ c.id }}"
-                   onchange="toggleCajaArchivos('{{ c.id }}', this)">
-            <span>Seleccionar todos</span>
+            <label class="select-all-head">
+              <input type="checkbox" class="chk-caja-archivos" data-caja-id="{{ c.id }}"
+                     onchange="toggleCajaArchivos('{{ c.id }}', this)">
+              <span>Seleccionar todos</span>
+            </label>
           </th>
           <th class="col-doc">Documento</th>
           <th class="col-name">Nombre</th>

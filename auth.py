@@ -1,6 +1,5 @@
 from werkzeug.security import generate_password_hash, check_password_hash
 from db import get_db
-import psycopg2
 
 
 def crear_usuario(usuario, password, rol="cliente"):
@@ -14,17 +13,20 @@ def crear_usuario(usuario, password, rol="cliente"):
     hash_pw = generate_password_hash(password)
 
     try:
+        cur.execute("SELECT 1 FROM usuarios WHERE usuario = %s", (usuario,))
+        if cur.fetchone():
+            conn.rollback()
+            return False
         cur.execute(
-            "INSERT INTO usuarios (usuario, password, rol) VALUES (%s, %s, %s) RETURNING id",
+            "INSERT INTO usuarios (usuario, [contraseña], rol) VALUES (%s, %s, %s) RETURNING id",
             (usuario, hash_pw, rol)
         )
         user_id = cur.fetchone()[0]
         conn.commit()
         return user_id
-    except psycopg2.errors.UniqueViolation:
-        # usuario ya existe
+    except Exception:
         conn.rollback()
-        return False
+        raise
     finally:
         cur.close()
         conn.close()
@@ -40,7 +42,7 @@ def verificar_usuario(usuario, password):
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT id, password, rol FROM usuarios WHERE usuario = %s AND activo = TRUE",
+        "SELECT id, [contraseña], rol FROM usuarios WHERE usuario = %s AND activo = 1",
         (usuario,)
     )
 
@@ -69,7 +71,7 @@ def obtener_usuario_y_rol(usuario):
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT id, rol FROM usuarios WHERE usuario = %s AND activo = TRUE",
+        "SELECT id, rol FROM usuarios WHERE usuario = %s AND activo = 1",
         (usuario,)
     )
 
@@ -86,7 +88,7 @@ def usuario_existe(usuario):
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT 1 FROM usuarios WHERE usuario = %s AND activo = TRUE",
+        "SELECT 1 FROM usuarios WHERE usuario = %s AND activo = 1",
         (usuario,)
     )
     row = cur.fetchone()

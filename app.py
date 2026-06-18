@@ -44,11 +44,14 @@ import threading
 import uuid
 import re
 import zipfile
+from werkzeug.exceptions import HTTPException
 try:
     from PyPDF2 import PdfReader, PdfWriter
 except Exception:
     PdfReader = None
     PdfWriter = None
+
+from error_catalog import error_text
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +66,10 @@ app.config["SESSION_COOKIE_NAME"] = os.environ.get("FLASK_SESSION_COOKIE_NAME", 
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_SECURE_COOKIES") == "1"
+
+
+def flash_error(code, fallback=None, detail=None):
+    flash(error_text(code, fallback=fallback, detail=detail), "error")
 
 def csrf_token():
     token = session.get("_csrf_token")
@@ -80,7 +87,7 @@ def csrf_protect():
     if request.method == "POST":
         sent = request.form.get("_csrf_token")
         if not sent or sent != session.get("_csrf_token"):
-            flash("Sesion invalida. Recarga e intenta de nuevo.", "error")
+            flash_error(1)
             return redirect(request.referrer or url_for("inicio"))
 
 app.jinja_env.globals["csrf_token"] = csrf_token
@@ -549,9 +556,9 @@ def login():
 
             return redirect(url_for("inicio"))
         if usuario_existe(usuario):
-            flash("Contrasena incorrecta.", "error")
+            flash_error(2)
         else:
-            flash("Usuario no registrado.", "error")
+            flash_error(3)
 
     return render_template("login.html")
 
@@ -644,11 +651,11 @@ def grupos():
     if request.method == "POST" and not admin_requerido():
         accion = request.form.get("accion")
         if accion != "actualizar_permiso":
-            flash("Accion no permitida.", "error")
+            flash_error(200)
             return redirect(url_for("grupos"))
 
         if not supervisor_requerido():
-            flash("No tienes permiso para modificar usuarios.", "error")
+            flash_error(201)
             return redirect(url_for("grupos"))
 
         grupo_id = int(request.form.get("grupo_id"))
@@ -658,7 +665,7 @@ def grupos():
 
         grupos_usuario = {g[0] for g in obtener_grupos_usuario(session.get("usuario_id"))}
         if grupo_id not in grupos_usuario:
-            flash("No tienes permiso para ese grupo.", "error")
+            flash_error(202)
             return redirect(url_for("grupos"))
 
         agregar_usuario_a_grupo(usuario_id, grupo_id, puede_eliminar, puede_editar)
@@ -675,7 +682,7 @@ def grupos():
                     crear_grupo(nombre, creado_por=session.get("usuario_id"))
                     flash("Grupo creado correctamente.", "success")
                 else:
-                    flash("Debes ingresar un nombre de grupo.", "error")
+                    flash_error(300)
 
             if accion == "agregar_usuario":
                 grupo_id = int(request.form.get("grupo_id"))
@@ -685,7 +692,7 @@ def grupos():
 
                 user_row = buscar_usuario_por_nombre(usuario)
                 if not user_row:
-                    flash("El usuario no existe.", "error")
+                    flash_error(301)
                 else:
                     agregar_usuario_a_grupo(user_row[0], grupo_id, puede_eliminar, puede_editar)
                     eliminar_grupo_personal(user_row[0], grupo_id)
@@ -712,26 +719,26 @@ def grupos():
                 if ok:
                     flash("Grupo archivado y eliminado correctamente.", "success")
                 else:
-                    flash("El grupo no existe.", "error")
+                    flash_error(307)
 
             if accion == "crear_usuario":
                 usuario = request.form.get("usuario", "").strip()
                 password = request.form.get("password", "").strip()
                 rol = request.form.get("rol", "cliente").strip()
                 if not usuario or not password:
-                    flash("Usuario y contrasena son obligatorios.", "error")
+                    flash_error(303)
                 else:
                     try:
                         user_id = crear_usuario(usuario, password, rol=rol)
                         if user_id is False:
-                            flash("El usuario ya existe.", "error")
+                            flash_error(302)
                         else:
                             grupo_id = crear_grupo(f"Personal - {usuario}", creado_por=user_id)
                             agregar_usuario_a_grupo(user_id, grupo_id, puede_eliminar=True, puede_editar=True)
                             flash("Usuario creado correctamente.", "success")
                     except Exception as e:
                         app.logger.exception("Error creando usuario desde grupos")
-                        flash(f"Error al crear usuario: {e}", "error")
+                        flash_error(304, detail=str(e))
 
             if accion == "actualizar_usuario":
                 usuario_id = int(request.form.get("usuario_id"))
@@ -820,7 +827,7 @@ def grupos():
                     flash("Usuario actualizado correctamente.", "success")
                 except Exception as e:
                     conn.rollback()
-                    flash(f"Error al actualizar usuario: {e}", "error")
+                    flash_error(305, detail=str(e))
                 finally:
                     cur.close()
                     conn.close()
@@ -831,7 +838,7 @@ def grupos():
                 usuario_id = int(request.form.get("usuario_id"))
                 return_to = request.form.get("return_to", "")
                 if usuario_id == session.get("usuario_id"):
-                    flash("No puedes eliminar tu propio usuario.", "error")
+                    flash_error(207)
                     return redirect(url_for("grupos"))
 
                 conn = get_db()
@@ -850,7 +857,7 @@ def grupos():
                     conn.commit()
                 except Exception as e:
                     conn.rollback()
-                    flash(f"Error al eliminar usuario: {e}", "error")
+                    flash_error(306, detail=str(e))
                     cur.close()
                     conn.close()
                     return redirect(url_for("grupos"))
@@ -1072,7 +1079,7 @@ def cajas():
             caja_id = int(request.form["caja_id"])
 
             if not puede_eliminar_cajas():
-                flash("Solo el supervisor o admin puede eliminar cajas.", "error")
+                flash_error(355, fallback="Solo el supervisor o admin puede eliminar cajas.")
                 return redirect(url_for("cajas"))
 
             eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
@@ -1096,7 +1103,7 @@ def cajas():
             nuevo_max = int(request.form["rango_max"])
 
             if not puede_crear_modificar_cajas():
-                flash("No tienes permiso para modificar cajas.", "error")
+                flash_error(204)
                 return redirect(url_for("cajas"))
 
             modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
@@ -1138,7 +1145,7 @@ def cajas():
             rmax = int(request.form["rango_max"])
 
             if not puede_crear_modificar_cajas():
-                flash("No tienes permiso para crear cajas.", "error")
+                flash_error(205)
                 return redirect(url_for("cajas"))
 
             nueva_caja_id = crear_caja(
@@ -1170,7 +1177,7 @@ def cajas():
             return redirect(url_for("cajas"))
 
         # Si llega algo raro:
-        flash("AcciÃ³n no vÃ¡lida.", "error")
+        flash_error(200)
         return redirect(url_for("cajas"))
 
     # ======================
@@ -1254,7 +1261,7 @@ def archivos_legacy():
             numero = int(request.form["numero"])
             tipo_doc = normalizar_tipo_doc(request.form.get("tipo_doc", ""))
             if not es_tipo_doc_valido(tipo_doc):
-                flash("Tipo de documento invalido.", "error")
+                flash_error(400)
                 return redirect(url_for("archivos"))
             nombre = request.form.get("nombre", "").strip()
             if not nombre:
@@ -1299,7 +1306,7 @@ def archivos_legacy():
             nombre_new = request.form.get("nombre_new", "").strip()
             tipo_doc_new = normalizar_tipo_doc(request.form.get("tipo_doc_new", ""))
             if not es_tipo_doc_valido(tipo_doc_new):
-                flash("Tipo de documento invalido.", "error")
+                flash_error(400)
                 return redirect(url_for("archivos"))
             nombre_new = normalizar_nombre(nombre_new)
             nombre_new = normalizar_nombre(nombre_new)
@@ -1377,7 +1384,7 @@ def archivos_legacy():
             numero = int(request.form["numero"])
 
             if not supervisor_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
-                flash("No tienes permiso para eliminar archivos en este grupo.", "error")
+                flash_error(203)
                 return redirect(url_for("archivos"))
 
             conn = get_db()
@@ -1739,7 +1746,7 @@ def archivo():
         if accion == "importar_excel":
             excel_file = request.files.get("excel")
             if not excel_file or not excel_file.filename:
-                flash("Debes seleccionar un archivo Excel.", "error")
+                flash_error(500)
                 return redirect(url_for("archivo"))
 
             uploads_dir = os.path.join(app.root_path, "uploads", "imports")
@@ -1764,7 +1771,7 @@ def archivo():
             pdf_files = request.files.getlist("pdfs")
             pdf_files = [f for f in pdf_files if f and f.filename]
             if not pdf_files:
-                flash("Debes seleccionar al menos un PDF.", "error")
+                flash_error(422, fallback="Debes seleccionar al menos un PDF.")
                 return redirect(url_for("archivo"))
 
             conn = get_db()
@@ -1836,7 +1843,7 @@ def archivo():
         if accion == "descarga_masiva_pdf":
             selected_raw = request.form.get("selected_docs", "").strip()
             if not selected_raw:
-                flash("Debes seleccionar al menos un PDF para descargar.", "error")
+                flash_error(422, fallback="Debes seleccionar al menos un PDF para descargar.")
                 return redirect(url_for("archivo"))
 
             selected_docs = []
@@ -1847,7 +1854,7 @@ def archivo():
 
             selected_docs = list(dict.fromkeys(selected_docs))
             if not selected_docs:
-                flash("La selección de PDFs no es válida.", "error")
+                flash_error(422)
                 return redirect(url_for("archivo"))
 
             conn = get_db()
@@ -1869,7 +1876,7 @@ def archivo():
             conn.close()
 
             if not rows:
-                flash("No se encontraron PDFs para la selección indicada.", "error")
+                flash_error(424)
                 return redirect(url_for("archivo"))
 
             zip_buffer = BytesIO()
@@ -1886,7 +1893,7 @@ def archivo():
                     agregados += 1
 
             if not agregados:
-                flash("Los PDFs seleccionados no están disponibles en el servidor.", "error")
+                flash_error(425)
                 return redirect(url_for("archivo"))
 
             zip_buffer.seek(0)
@@ -1904,7 +1911,7 @@ def archivo():
             rmax = int(request.form["rango_max"])
 
             if not puede_crear_modificar_cajas():
-                flash("No tienes permiso para crear cajas.", "error")
+                flash_error(205)
                 return redirect(url_for("archivo"))
 
             nueva_caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=session.get("usuario_id"))
@@ -1929,7 +1936,7 @@ def archivo():
             numero = int(request.form["numero"])
             tipo_doc = normalizar_tipo_doc(request.form.get("tipo_doc", ""))
             if not es_tipo_doc_valido(tipo_doc):
-                flash("Tipo de documento invalido.", "error")
+                flash_error(400)
                 return redirect(url_for("archivo"))
             nombre = request.form.get("nombre", "").strip()
             if not nombre:
@@ -1967,7 +1974,7 @@ def archivo():
                 if not es_pdf(file):
                     cur.close()
                     conn.close()
-                    flash("El archivo debe ser PDF.", "error")
+                    flash_error(407)
                     return redirect(url_for("archivo"))
 
                 pdf_name = guardar_pdf(file, numero, grupo_id)
@@ -2011,7 +2018,7 @@ def archivo():
             numero = int(request.form["numero"])
 
             if not supervisor_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
-                flash("No tienes permiso para eliminar archivos en este grupo.", "error")
+                flash_error(203)
                 return redirect(url_for("archivo"))
 
             conn = get_db()
@@ -2078,7 +2085,7 @@ def archivo():
             nombre_new = normalizar_nombre(nombre_new)
             tipo_doc_new = normalizar_tipo_doc(request.form.get("tipo_doc_new", ""))
             if not es_tipo_doc_valido(tipo_doc_new):
-                flash("Tipo de documento invalido.", "error")
+                flash_error(400)
                 return redirect(url_for("archivo"))
 
             # checkbox para eliminar PDF actual / agregar PDF
@@ -2099,7 +2106,7 @@ def archivo():
             if not antes:
                 cur.close()
                 conn.close()
-                flash("No se encontrÃ³ el archivo a modificar.", "error")
+                flash_error(404)
                 return redirect(url_for("archivo"))
 
             archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old, tipo_doc_old = antes
@@ -2138,7 +2145,7 @@ def archivo():
                 if not es_pdf(file):
                     cur.close()
                     conn.close()
-                    flash("El archivo debe ser PDF.", "error")
+                    flash_error(407)
                     return redirect(url_for("archivo"))
 
                 if append_pdf:
@@ -2146,7 +2153,7 @@ def archivo():
                     if not pdf_name:
                         cur.close()
                         conn.close()
-                        flash("No se pudo unir el PDF.", "error")
+                        flash_error(423)
                         return redirect(url_for("archivo"))
                 else:
                     # si habÃ­a anterior y no se eliminÃ³ arriba, lo borramos
@@ -2209,7 +2216,7 @@ def archivo():
 
         # AcciÃ³n desconocida
         else:
-            flash("AcciÃ³n no reconocida.", "error")
+            flash_error(200)
             return redirect(url_for("archivo"))
 
     # =========================================================
@@ -2413,7 +2420,7 @@ def archivo_caja(caja_id):
             nuevo_max = int(request.form["rango_max"])
 
             if not puede_crear_modificar_cajas():
-                flash("No tienes permiso para modificar cajas.", "error")
+                flash_error(204)
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
@@ -2444,7 +2451,7 @@ def archivo_caja(caja_id):
         # ---------- ELIMINAR CAJA ----------
         if accion == "eliminar_caja":
             if not puede_eliminar_cajas():
-                flash("Solo el supervisor o admin puede eliminar cajas.", "error")
+                flash_error(355, fallback="Solo el supervisor o admin puede eliminar cajas.")
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
@@ -2464,7 +2471,7 @@ def archivo_caja(caja_id):
             numero = int(request.form["numero"])
 
             if not supervisor_requerido() and not usuario_puede_eliminar(session.get("usuario_id"), grupo_id):
-                flash("No tienes permiso para eliminar archivos en este grupo.", "error")
+                flash_error(203)
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             conn = get_db()
@@ -2521,7 +2528,7 @@ def archivo_caja(caja_id):
             nombre_new = request.form.get("nombre_new", "").strip()
             tipo_doc_new = normalizar_tipo_doc(request.form.get("tipo_doc_new", ""))
             if not es_tipo_doc_valido(tipo_doc_new):
-                flash("Tipo de documento invalido.", "error")
+                flash_error(400)
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             remove_pdf = request.form.get("remove_pdf") == "1"
@@ -2542,7 +2549,7 @@ def archivo_caja(caja_id):
             if not row:
                 cur.close()
                 conn.close()
-                flash("No se encontro el archivo a modificar.", "error")
+                flash_error(404)
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             archivo_id, caja_old, numero_viejo, nombre_viejo, pdf_old, tipo_doc_old = row
@@ -2567,7 +2574,7 @@ def archivo_caja(caja_id):
                 if not es_pdf(file):
                     cur.close()
                     conn.close()
-                    flash("El archivo debe ser PDF.", "error")
+                    flash_error(407)
                     return redirect(url_for("archivo_caja", caja_id=caja_id))
 
                 if append_pdf:
@@ -2575,7 +2582,7 @@ def archivo_caja(caja_id):
                     if not pdf_name:
                         cur.close()
                         conn.close()
-                        flash("No se pudo unir el PDF.", "error")
+                        flash_error(423)
                         return redirect(url_for("archivo_caja", caja_id=caja_id))
                 else:
                     # borrar anterior si existÃ­a
@@ -2660,7 +2667,7 @@ def archivo_caja(caja_id):
     if not caja_info:
         cur.close()
         conn.close()
-        flash("La caja no existe.", "error")
+        flash_error(350)
         return redirect(url_for("archivo"))
 
     # archivos de la caja (incluye pdf_path para habilitar Ver PDF)
@@ -2706,33 +2713,33 @@ def archivo_duplicados():
             nombre = request.form.get("nombre", "").strip()
 
             if not ids_raw:
-                flash("No seleccionaste registros.", "error")
+                flash_error(550)
                 return redirect(url_for("archivo_duplicados"))
 
             ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
             if len(ids) < 2:
-                flash("Debes seleccionar al menos 2 registros.", "error")
+                flash_error(551)
                 return redirect(url_for("archivo_duplicados"))
 
             if not base_id_raw or not base_id_raw.isdigit():
-                flash("Selecciona el registro base.", "error")
+                flash_error(552)
                 return redirect(url_for("archivo_duplicados"))
 
             base_id = int(base_id_raw)
             if base_id not in ids:
-                flash("El registro base debe estar dentro de la selección.", "error")
+                flash_error(553)
                 return redirect(url_for("archivo_duplicados"))
 
             if not es_tipo_doc_valido(tipo_doc):
-                flash("Tipo de documento invalido.", "error")
+                flash_error(400)
                 return redirect(url_for("archivo_duplicados"))
 
             if not numero_raw.isdigit():
-                flash("Documento invalido.", "error")
+                flash_error(401)
                 return redirect(url_for("archivo_duplicados"))
 
             if not nombre:
-                flash("El nombre es obligatorio.", "error")
+                flash_error(402)
                 return redirect(url_for("archivo_duplicados"))
 
             numero = int(numero_raw)
@@ -2750,7 +2757,7 @@ def archivo_duplicados():
                     )
                     rows.extend([r[0] for r in cur.fetchall()])
                 if len(set(rows)) != len(set(ids)):
-                    flash("Seleccion invalida.", "error")
+                    flash_error(554)
                     return redirect(url_for("archivo_duplicados"))
 
                 otros = [i for i in ids if i != base_id]
@@ -2776,7 +2783,7 @@ def archivo_duplicados():
             except Exception:
                 conn.rollback()
                 app.logger.exception("Error unificando duplicados")
-                flash("Error al unificar duplicados.", "error")
+                flash_error(555)
             finally:
                 cur.close()
                 conn.close()
@@ -2927,7 +2934,7 @@ def admin_logs():
     except Exception:
         conn.rollback()
         app.logger.exception("Error cargando auditoria")
-        flash("No se pudo cargar Auditoria.", "error")
+        flash_error(680)
 
     try:
         cur.execute("""
@@ -2954,7 +2961,7 @@ def admin_logs():
     except Exception:
         conn.rollback()
         app.logger.exception("Error cargando movimientos")
-        flash("No se pudo cargar Movimientos.", "error")
+        flash_error(681)
 
     try:
         cur.execute("""
@@ -3006,7 +3013,7 @@ def admin_logs():
     except Exception:
         conn.rollback()
         app.logger.exception("Error cargando usuarios/grupos")
-        flash("No se pudo cargar Usuarios.", "error")
+        flash_error(682)
 
     cur.close()
     conn.close()
@@ -3073,7 +3080,7 @@ def deshacer_movimiento(mov_id):
     if not row:
         cur.close()
         conn.close()
-        flash("Movimiento no encontrado.", "error")
+        flash_error(683)
         return redirect(url_for("admin_movimientos"))
 
     item, accion, datos_antes, datos_despues, grupo_id = row
@@ -3173,7 +3180,7 @@ def deshacer_movimiento(mov_id):
         flash("Movimiento deshecho.", "success")
     except Exception as e:
         conn.rollback()
-        flash(f"Error al deshacer: {e}", "error")
+        flash_error(684, detail=str(e))
     finally:
         cur.close()
         conn.close()
@@ -3199,14 +3206,14 @@ def archivador_transferir():
     grupo_destino = int(request.form.get("grupo_destino"))
 
     if es_archivador_grupo(grupo_destino):
-        flash("No puedes mover elementos al Archivador.", "error")
+        flash_error(208)
         return redirect(url_for("archivo") + "?view=especial")
 
     cajas_ids = [int(x) for x in cajas_ids_raw.split(",") if x.strip().isdigit()]
     archivos_ids = [int(x) for x in archivos_ids_raw.split(",") if x.strip().isdigit()]
 
     if not cajas_ids and not archivos_ids:
-        flash("No hay elementos seleccionados.", "error")
+        flash_error(600)
         return redirect(url_for("archivo") + "?view=especial")
 
     conn = get_db()
@@ -3347,7 +3354,7 @@ def archivador_eliminar():
     archivos_ids = [int(x) for x in archivos_ids_raw.split(",") if x.strip().isdigit()]
 
     if not cajas_ids and not archivos_ids:
-        flash("No hay elementos seleccionados.", "error")
+        flash_error(600)
         return redirect(url_for("archivo") + "?view=especial")
 
     conn = get_db()
@@ -3547,11 +3554,16 @@ def ver_pdf(numero):
     conn.close()
 
     if not row or not row[0]:
-        # Si no hay PDF
-        return "No hay PDF para este documento.", 404
+        return error_text(420), 404
 
     filename = row[0]
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=False)
+    path = filename
+    if not os.path.isabs(path):
+        path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    if not os.path.exists(path):
+        return error_text(421), 404
+
+    return send_file(path, as_attachment=False, mimetype="application/pdf")
 
 
 @app.route("/pdf/<int:numero>/pages")
@@ -3572,10 +3584,10 @@ def ver_pdf_paginas(numero):
             pages.append(int(p) - 1)
 
     if not pages:
-        return "No hay paginas seleccionadas.", 400
+        return error_text(422, fallback="No hay paginas seleccionadas."), 400
 
     if PdfReader is None or PdfWriter is None:
-        return "No se pudo procesar el PDF seleccionado.", 500
+        return error_text(904, fallback="No se pudo procesar el PDF seleccionado."), 500
 
     conn = get_db()
     cur = conn.cursor()
@@ -3588,12 +3600,12 @@ def ver_pdf_paginas(numero):
     conn.close()
 
     if not row or not row[0]:
-        return "No hay PDF para este documento.", 404
+        return error_text(420), 404
 
     filename = row[0]
     path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
     if not os.path.exists(path):
-        return "No hay PDF para este documento.", 404
+        return error_text(421), 404
 
     try:
         reader = PdfReader(path)
@@ -3604,7 +3616,7 @@ def ver_pdf_paginas(numero):
                 writer.add_page(reader.pages[idx])
     except Exception:
         app.logger.exception("Error creando PDF seleccionado")
-        return "No se pudo procesar el PDF seleccionado.", 500
+        return error_text(904, fallback="No se pudo procesar el PDF seleccionado."), 500
 
     output = BytesIO()
     writer.write(output)
@@ -3620,10 +3632,28 @@ def ver_pdf_paginas(numero):
 if __name__ == "__main__":
     app.run(debug=False)
 
+@app.errorhandler(404)
+def handle_not_found(e):
+    if login_requerido():
+        flash_error(750)
+        return redirect(request.referrer or url_for("inicio"))
+    return error_text(750), 404
+
+
+@app.errorhandler(405)
+def handle_method_not_allowed(e):
+    if login_requerido():
+        flash_error(751)
+        return redirect(request.referrer or url_for("inicio"))
+    return error_text(751), 405
+
+
 @app.errorhandler(Exception)
 def handle_unhandled_exception(e):
+    if isinstance(e, HTTPException):
+        return e
     app.logger.exception("Unhandled exception")
     if login_requerido():
-        flash("Ocurrio un error interno. Intenta de nuevo.", "error")
+        flash_error(900)
         return redirect(request.referrer or url_for("inicio"))
-    return "Ocurrio un error interno.", 500
+    return error_text(900), 500

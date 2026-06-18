@@ -125,9 +125,7 @@ def _build_connection_string(url: str) -> str:
 
 
 def get_db():
-    print("Entrando a get_db()")
     url = os.environ.get("DATABASE_URL")
-    print("DATABASE_URL:", url)
     if not url:
         raise RuntimeError("DATABASE_URL no está definido")
 
@@ -139,6 +137,4 @@ def get_db():
 
     conn = pyodbc.connect(_build_connection_string(url))
     conn.autocommit = False
-    dbname = parsed.path.lstrip("/")
-    print(f"Conectado a la base de datos: {dbname}")
     return SqlServerConnection(conn)

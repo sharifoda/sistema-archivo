@@ -1,7 +1,7 @@
 ﻿print(">>> APP.PY CORRECTO CARGADO <<<")
 import os
 from werkzeug.utils import secure_filename
-from flask import send_file, send_from_directory
+from flask import send_file, send_from_directory, jsonify
 from openpyxl import Workbook, load_workbook
 from io import BytesIO
 from flask import Flask, render_template, request, redirect, url_for, session, send_file
@@ -67,9 +67,45 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_SECURE_COOKIES") == "1"
 
+IMPORT_JOBS = {}
+IMPORT_JOBS_LOCK = threading.Lock()
+
 
 def flash_error(code, fallback=None, detail=None):
     flash(error_text(code, fallback=fallback, detail=detail), "error")
+
+
+def build_import_job_payload(job_id, **extra):
+    payload = {
+        "job_id": job_id,
+        "status": "pending",
+        "message": "Importacion en cola.",
+        "error_code": None,
+        "total_rows": 0,
+        "processed_rows": 0,
+        "inserted": 0,
+        "ignored": 0,
+        "invalid": 0,
+        "detail": "",
+        "created_at": datetime.utcnow().isoformat(),
+        "finished_at": None,
+    }
+    payload.update(extra)
+    return payload
+
+
+def set_import_job(job_id, **updates):
+    with IMPORT_JOBS_LOCK:
+        current = IMPORT_JOBS.get(job_id, build_import_job_payload(job_id))
+        current.update(updates)
+        IMPORT_JOBS[job_id] = current
+        return dict(current)
+
+
+def get_import_job(job_id):
+    with IMPORT_JOBS_LOCK:
+        job = IMPORT_JOBS.get(job_id)
+        return dict(job) if job else None
 
 def csrf_token():
     token = session.get("_csrf_token")
@@ -91,6 +127,22 @@ def csrf_protect():
             return redirect(request.referrer or url_for("inicio"))
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.route("/importacion/estado/<job_id>")
+def importacion_estado(job_id):
+    if not login_requerido():
+        return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
+
+    current_job_id = session.get("last_import_job_id")
+    if current_job_id != job_id and not admin_requerido():
+        return jsonify({"ok": False, "error": error_text(206)}), 403
+
+    job = get_import_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": error_text(750)}), 404
+
+    return jsonify({"ok": True, "job": job})
 
 def normalizar_nombre(nombre):
     return nombre.upper() if nombre else nombre
@@ -160,12 +212,14 @@ def parse_item_movimiento(item):
 
 def insertar_archivos_lote(cur, rows):
     insertados = []
+    ignorados = 0
     for caja_id, numero, nombre, grupo_id, creado_por, tipo_doc in rows:
         cur.execute(
             "SELECT TOP 1 id FROM archivos WHERE grupo_id = %s AND numero = %s",
             (grupo_id, numero)
         )
         if cur.fetchone():
+            ignorados += 1
             continue
         cur.execute(
             """
@@ -177,7 +231,7 @@ def insertar_archivos_lote(cur, rows):
         )
         archivo_id = cur.fetchone()[0]
         insertados.append((archivo_id, numero, nombre, caja_id, tipo_doc))
-    return insertados
+    return insertados, ignorados
 
 
 def insertar_movimientos_lote(cur, rows):
@@ -321,19 +375,39 @@ def es_archivador_grupo(grupo_id):
     return row and row[0] == "Archivador"
 
 
-def importar_excel_job(file_path, grupo_id, usuario_id):
+def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
     """
     Procesa la importacion de Excel en segundo plano con inserciones por lotes.
     """
+    set_import_job(
+        job_id,
+        status="processing",
+        message="Importacion en proceso.",
+        processed_rows=0,
+        inserted=0,
+        ignored=0,
+        invalid=0,
+        error_code=None,
+        finished_at=None,
+    )
     try:
         wb = load_workbook(file_path, data_only=True)
     except Exception:
         app.logger.exception("Archivo Excel invalido")
+        set_import_job(
+            job_id,
+            status="failed",
+            message=error_text(501),
+            error_code=501,
+            finished_at=datetime.utcnow().isoformat(),
+        )
         return
 
     ws = wb.active
     max_row = ws.max_row or 1
     max_col = ws.max_column or 1
+    total_rows = max(max_row - 1, 0)
+    set_import_job(job_id, total_rows=total_rows)
 
     headers = []
     for col in range(1, max_col + 1):
@@ -380,12 +454,15 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
             caja_pendiente_id = asegurar_caja_sin_asignar(grupo_id)
 
             values = []
+            invalidos = 0
             for row in range(2, max_row + 1):
                 tipo_doc = normalizar_tipo_doc(ws.cell(row=row, column=tipo_idx).value)
                 if not es_tipo_doc_valido(tipo_doc):
+                    invalidos += 1
                     continue
                 numero = _clean_num(ws.cell(row=row, column=doc_idx).value)
                 if not numero:
+                    invalidos += 1
                     continue
 
                 parts = []
@@ -407,30 +484,83 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
 
             if not values:
                 app.logger.warning("Importacion Excel: sin filas validas")
+                set_import_job(
+                    job_id,
+                    status="partial",
+                    message=error_text(503, detail="No se encontraron filas validas."),
+                    processed_rows=total_rows,
+                    inserted=0,
+                    ignored=0,
+                    invalid=invalidos,
+                    error_code=503,
+                    finished_at=datetime.utcnow().isoformat(),
+                )
                 return
 
-            rows = insertar_archivos_lote(cur, values)
+            inserted = 0
+            ignorados = 0
+            procesados = invalidos
+            for chunk in iter_chunks(values, size=500):
+                rows, ignored_chunk = insertar_archivos_lote(cur, chunk)
+                ignorados += ignored_chunk
+                inserted += len(rows)
+                procesados += len(chunk)
 
-            if rows:
-                mov_values = [
-                    (
-                        usuario_id,
-                        grupo_id,
-                        "archivo",
-                        r[0],
-                        "CREAR_ARCHIVO",
-                        None,
-                        json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
-                        None,
-                    )
-                    for r in rows
-                ]
-                insertar_movimientos_lote(cur, mov_values)
+                if rows:
+                    mov_values = [
+                        (
+                            usuario_id,
+                            grupo_id,
+                            "archivo",
+                            r[0],
+                            "CREAR_ARCHIVO",
+                            None,
+                            json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
+                            None,
+                        )
+                        for r in rows
+                    ]
+                    insertar_movimientos_lote(cur, mov_values)
 
-            conn.commit()
+                conn.commit()
+                set_import_job(
+                    job_id,
+                    processed_rows=min(procesados, total_rows),
+                    inserted=inserted,
+                    ignored=ignorados,
+                    invalid=invalidos,
+                    detail=f"Nuevos archivos: {inserted} | Ignorados: {ignorados} | Invalidos: {invalidos}",
+                )
+
+            final_status = "success" if not invalidos and not ignorados else "partial"
+            detail = f"Nuevos archivos: {inserted} | Ignorados: {ignorados} | Invalidos: {invalidos}"
+            set_import_job(
+                job_id,
+                status=final_status,
+                message=(
+                    "Importacion finalizada correctamente."
+                    if final_status == "success"
+                    else "Importacion finalizada con observaciones."
+                ),
+                processed_rows=total_rows,
+                inserted=inserted,
+                ignored=ignorados,
+                invalid=invalidos,
+                error_code=None if final_status == "success" else 503,
+                detail=detail,
+                finished_at=datetime.utcnow().isoformat(),
+            )
         except Exception:
             conn.rollback()
             app.logger.exception("Error importando Excel (formato filas)")
+            set_import_job(
+                job_id,
+                status="failed",
+                message=error_text(504),
+                processed_rows=total_rows,
+                error_code=504,
+                finished_at=datetime.utcnow().isoformat(),
+            )
         finally:
             cur.close()
             conn.close()
@@ -459,6 +589,17 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
 
     if not columnas:
         app.logger.warning("Importacion Excel: sin cajas")
+        set_import_job(
+            job_id,
+            status="partial",
+            message=error_text(503, detail="El Excel no contenia columnas validas."),
+            processed_rows=total_rows,
+            inserted=0,
+            ignored=0,
+            invalid=total_rows,
+            error_code=503,
+            finished_at=datetime.utcnow().isoformat(),
+        )
         return
 
     conn = get_db()
@@ -470,31 +611,75 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
             numeros.extend(nums)
 
         numeros = sorted(set(numeros))
-        rows = insertar_archivos_lote(
-            cur,
-            [(caja_pendiente_id, n, f"Documento {n}", grupo_id, usuario_id, "CC") for n in numeros]
+        inserted = 0
+        ignorados = 0
+        procesados = max(total_rows - len(numeros), 0)
+        for chunk in iter_chunks(numeros, size=500):
+            rows, ignored_chunk = insertar_archivos_lote(
+                cur,
+                [(caja_pendiente_id, n, f"Documento {n}", grupo_id, usuario_id, "CC") for n in chunk]
+            )
+            ignorados += ignored_chunk
+            inserted += len(rows)
+            procesados += len(chunk)
+
+            if rows:
+                mov_values = [
+                    (
+                        usuario_id,
+                        grupo_id,
+                        "archivo",
+                        r[0],
+                        "CREAR_ARCHIVO",
+                        None,
+                        json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
+                        None,
+                    )
+                    for r in rows
+                ]
+                insertar_movimientos_lote(cur, mov_values)
+
+            conn.commit()
+            invalidos = max(total_rows - len(numeros), 0)
+            set_import_job(
+                job_id,
+                processed_rows=min(procesados, total_rows),
+                inserted=inserted,
+                ignored=ignorados,
+                invalid=invalidos,
+                detail=f"Nuevos archivos: {inserted} | Ignorados: {ignorados} | Invalidos: {invalidos}",
+            )
+
+        invalidos = max(total_rows - len(numeros), 0)
+        final_status = "success" if not invalidos and not ignorados else "partial"
+        detail = f"Nuevos archivos: {inserted} | Ignorados: {ignorados} | Invalidos: {invalidos}"
+        set_import_job(
+            job_id,
+            status=final_status,
+            message=(
+                "Importacion finalizada correctamente."
+                if final_status == "success"
+                else "Importacion finalizada con observaciones."
+            ),
+            processed_rows=total_rows,
+            inserted=inserted,
+            ignored=ignorados,
+            invalid=invalidos,
+            error_code=None if final_status == "success" else 503,
+            detail=detail,
+            finished_at=datetime.utcnow().isoformat(),
         )
-
-        if rows:
-            mov_values = [
-                (
-                    usuario_id,
-                    grupo_id,
-                    "archivo",
-                    r[0],
-                    "CREAR_ARCHIVO",
-                    None,
-                    json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
-                    None,
-                )
-                for r in rows
-            ]
-            insertar_movimientos_lote(cur, mov_values)
-
-        conn.commit()
     except Exception:
         conn.rollback()
         app.logger.exception("Error importando Excel")
+        set_import_job(
+            job_id,
+            status="failed",
+            message=error_text(504),
+            processed_rows=total_rows,
+            error_code=504,
+            finished_at=datetime.utcnow().isoformat(),
+        )
     finally:
         cur.close()
         conn.close()
@@ -1633,6 +1818,8 @@ def archivo():
 
     archivador_mode = admin_requerido() and es_archivador_grupo(grupo_id)
     view_mode = request.args.get("view", "").strip()
+    import_job_id = session.get("last_import_job_id")
+    import_job = get_import_job(import_job_id) if import_job_id else None
 
     if request.method == "GET" and archivador_mode and view_mode == "especial":
         conn = get_db()
@@ -1739,10 +1926,17 @@ def archivo():
             filename = f"import_{uuid.uuid4().hex}{ext or '.xlsx'}"
             file_path = os.path.join(uploads_dir, filename)
             excel_file.save(file_path)
+            job_id = uuid.uuid4().hex
+            session["last_import_job_id"] = job_id
+            set_import_job(
+                job_id,
+                status="pending",
+                message="Importacion iniciada.",
+            )
 
             t = threading.Thread(
                 target=importar_excel_job,
-                args=(file_path, grupo_id, session.get("usuario_id")),
+                args=(file_path, grupo_id, session.get("usuario_id"), job_id),
                 daemon=True
             )
             t.start()
@@ -2375,7 +2569,9 @@ def archivo():
         cajas=cajas,
         resultado=resultado,
         archivador_mode=archivador_mode,
-        pdf_bulk_data=pdf_bulk_data
+        pdf_bulk_data=pdf_bulk_data,
+        import_job=import_job,
+        import_status_url=url_for("importacion_estado", job_id=import_job_id) if import_job_id else None,
     )
 
 # ---------------- archivo_caja ----------------

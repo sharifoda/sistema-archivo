@@ -6,9 +6,13 @@ const data = JSON.parse(el.dataset.json);
 
 const URL_CAJA_BASE = data.urlCajaBase;
 const URL_PDF_BASE  = data.urlPdfBase;
+const IMPORT_STATUS_URL = data.importStatusUrl || "";
+const IMPORT_JOB = data.importJob || null;
 const resultado     = data.resultado;
 const csrfToken     = data.csrfToken || "";
 const PDF_BULK_DATA = Array.isArray(data.pdfBulkData) ? data.pdfBulkData : [];
+let importStatusTimer = null;
+let importLastInserted = IMPORT_JOB && Number.isFinite(Number(IMPORT_JOB.inserted)) ? Number(IMPORT_JOB.inserted) : 0;
 
 /* =========================
    Estado global de búsqueda
@@ -90,6 +94,67 @@ function escapeAttr(value) {
     .replace(/'/g, "&#39;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function renderImportStatus(job) {
+  const banner = document.getElementById("importStatusBanner");
+  const title = document.getElementById("importStatusTitle");
+  const meta = document.getElementById("importStatusMeta");
+  const note = document.getElementById("importStatusNote");
+  if (!banner || !title || !meta || !note) return;
+
+  if (!job) {
+    banner.className = "import-status";
+    title.textContent = "";
+    meta.innerHTML = "";
+    note.textContent = "";
+    return;
+  }
+
+  banner.className = `import-status visible ${job.status || "processing"}`;
+  title.textContent = job.message || "Importacion en proceso.";
+  meta.innerHTML = [
+    `Total filas: ${formatMiles(job.total_rows || 0)}`,
+    `Procesadas: ${formatMiles(job.processed_rows || 0)}`,
+    `Nuevos: ${formatMiles(job.inserted || 0)}`,
+    `Ignorados: ${formatMiles(job.ignored || 0)}`,
+    `Invalidos: ${formatMiles(job.invalid || 0)}`
+  ]
+    .map((item) => `<span>${item}</span>`)
+    .join("");
+  note.textContent = job.detail || "";
+}
+
+async function pollImportStatus() {
+  if (!IMPORT_STATUS_URL) return;
+  try {
+    const response = await fetch(IMPORT_STATUS_URL, {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      cache: "no-store"
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (!payload.ok || !payload.job) return;
+    renderImportStatus(payload.job);
+
+    const insertedNow = Number(payload.job.inserted || 0);
+    if (insertedNow > importLastInserted) {
+      importLastInserted = insertedNow;
+      window.setTimeout(() => window.location.reload(), 400);
+      return;
+    }
+
+    if (payload.job.status === "processing" || payload.job.status === "pending") {
+      importStatusTimer = window.setTimeout(pollImportStatus, 2500);
+      return;
+    }
+
+    if (payload.job.status === "success" || payload.job.status === "partial") {
+      window.setTimeout(() => window.location.reload(), 1500);
+    }
+  } catch (error) {
+    console.error("No se pudo consultar el estado de importacion", error);
+  }
 }
 
 /* =========================
@@ -499,6 +564,13 @@ if (resultado) {
   }
 
   abrirModal("Buscar");
+}
+
+if (IMPORT_JOB) {
+  renderImportStatus(IMPORT_JOB);
+  if (IMPORT_JOB.status === "processing" || IMPORT_JOB.status === "pending") {
+    importStatusTimer = window.setTimeout(pollImportStatus, 1200);
+  }
 }
 
 

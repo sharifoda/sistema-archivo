@@ -1,6 +1,6 @@
 import os
 import re
-from urllib.parse import parse_qs, unquote_plus, urlparse
+from urllib.parse import parse_qs, unquote, unquote_plus, urlparse
 
 import pyodbc
 from dotenv import load_dotenv
@@ -95,7 +95,7 @@ class SqlServerConnection:
 
 def _build_connection_string(url: str) -> str:
     parsed = urlparse(url)
-    dbname = parsed.path.lstrip("/")
+    dbname = unquote(parsed.path.lstrip("/"))
     if not dbname:
         raise RuntimeError("DATABASE_URL no contiene nombre de base de datos")
 
@@ -111,10 +111,13 @@ def _build_connection_string(url: str) -> str:
         "TrustServerCertificate=yes",
     ]
 
-    if parsed.username:
-        parts.append(f"UID={parsed.username}")
-    if parsed.password:
-        parts.append(f"PWD={parsed.password}")
+    username = unquote(parsed.username) if parsed.username else None
+    password = unquote(parsed.password) if parsed.password else None
+
+    if username:
+        parts.append(f"UID={username}")
+    if password:
+        parts.append(f"PWD={password}")
     else:
         parts.append("Trusted_Connection=yes")
 
@@ -139,4 +142,3 @@ def get_db():
     dbname = parsed.path.lstrip("/")
     print(f"Conectado a la base de datos: {dbname}")
     return SqlServerConnection(conn)
-

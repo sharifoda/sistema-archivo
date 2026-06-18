@@ -3182,10 +3182,13 @@ def deshacer_movimiento(mov_id):
 
 
 # ---------------- ARCHIVADOR: TRANSFERIR ----------------
-@app.route("/archivador/transferir", methods=["POST"])
+@app.route("/archivador/transferir", methods=["GET", "POST"])
 def archivador_transferir():
     if not login_requerido():
         return redirect(url_for("login"))
+
+    if request.method == "GET":
+        return redirect(url_for("archivo") + "?view=especial")
 
     grupo_id = obtener_grupo_id()
     if not admin_requerido() or not es_archivador_grupo(grupo_id):
@@ -3325,10 +3328,13 @@ def archivador_transferir():
 
 
 # ---------------- ARCHIVADOR: ELIMINAR ----------------
-@app.route("/archivador/eliminar", methods=["POST"])
+@app.route("/archivador/eliminar", methods=["GET", "POST"])
 def archivador_eliminar():
     if not login_requerido():
         return redirect(url_for("login"))
+
+    if request.method == "GET":
+        return redirect(url_for("archivo") + "?view=especial")
 
     grupo_id = obtener_grupo_id()
     if not admin_requerido() or not es_archivador_grupo(grupo_id):

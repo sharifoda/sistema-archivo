@@ -365,6 +365,7 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
         return " ".join([p for p in parts if p])
 
     # ===== Formato nuevo (filas con tipo_doc + documento + nombres/apellidos)
+    # Por decision operativa, toda importacion entra primero a Caja 0.
     if "tipo_doc" in headers and "documento" in headers:
         tipo_idx = headers.index("tipo_doc") + 1
         doc_idx = headers.index("documento") + 1
@@ -376,16 +377,6 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
         conn = get_db()
         cur = conn.cursor()
         try:
-            cur.execute(
-                """
-                SELECT id, rango_min, rango_max
-                FROM cajas
-                WHERE grupo_id = %s AND is_pendiente = FALSE
-                ORDER BY rango_min, id
-                """,
-                (grupo_id,)
-            )
-            cajas_rangos = cur.fetchall()
             caja_pendiente_id = asegurar_caja_sin_asignar(grupo_id)
 
             values = []
@@ -412,13 +403,7 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
                     nombre = f"Documento {numero}"
                 nombre = normalizar_nombre(nombre)
 
-                caja_id = caja_pendiente_id
-                for cid, rmin, rmax in cajas_rangos:
-                    if rmin is not None and rmax is not None and rmin <= numero <= rmax:
-                        caja_id = cid
-                        break
-
-                values.append((caja_id, numero, nombre, grupo_id, usuario_id, tipo_doc))
+                values.append((caja_pendiente_id, numero, nombre, grupo_id, usuario_id, tipo_doc))
 
             if not values:
                 app.logger.warning("Importacion Excel: sin filas validas")
@@ -455,7 +440,9 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
                 pass
         return
 
-    # ===== Formato anterior (cajas por columna)
+    # ===== Formato anterior
+    # Aunque el Excel venga separado por columnas, no se crean cajas desde la importacion.
+    # Todo entra a Caja 0 y luego las cajas reales reubican los documentos automaticamente.
     columnas = []
     for col in range(1, max_col + 1):
         header = ws.cell(row=1, column=col).value
@@ -477,35 +464,32 @@ def importar_excel_job(file_path, grupo_id, usuario_id):
     conn = get_db()
     cur = conn.cursor()
     try:
+        caja_pendiente_id = asegurar_caja_sin_asignar(grupo_id)
+        numeros = []
         for _, _, nums in columnas:
-            nums = sorted(set(nums))
-            if not nums:
-                continue
-            rmin = min(nums)
-            rmax = max(nums)
-            caja_id = crear_caja(rmin, rmax, grupo_id, creado_por=usuario_id)
+            numeros.extend(nums)
 
-            values = [(n, f"Documento {n}", caja_id, usuario_id, grupo_id, "CC") for n in nums]
-            rows = insertar_archivos_lote(
-                cur,
-                [(caja_id, n, f"Documento {n}", grupo_id, usuario_id, "CC") for n in nums]
-            )
+        numeros = sorted(set(numeros))
+        rows = insertar_archivos_lote(
+            cur,
+            [(caja_pendiente_id, n, f"Documento {n}", grupo_id, usuario_id, "CC") for n in numeros]
+        )
 
-            if rows:
-                mov_values = [
-                    (
-                        usuario_id,
-                        grupo_id,
-                        "archivo",
-                        r[0],
-                        "CREAR_ARCHIVO",
-                        None,
-                        json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
-                        None,
-                    )
-                    for r in rows
-                ]
-                insertar_movimientos_lote(cur, mov_values)
+        if rows:
+            mov_values = [
+                (
+                    usuario_id,
+                    grupo_id,
+                    "archivo",
+                    r[0],
+                    "CREAR_ARCHIVO",
+                    None,
+                    json_text({"id": r[0], "numero": r[1], "nombre": r[2], "caja_id": r[3], "tipo_doc": r[4]}),
+                    None,
+                )
+                for r in rows
+            ]
+            insertar_movimientos_lote(cur, mov_values)
 
         conn.commit()
     except Exception:

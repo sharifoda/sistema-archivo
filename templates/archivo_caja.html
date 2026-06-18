@@ -28,10 +28,15 @@
   .modal-overlay{
     display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999;
   }
+  body.modal-open{
+    overflow:hidden;
+  }
   .modal{
-    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    display:none; position:fixed; top:24px; left:50%; transform:translateX(-50%);
     width:min(520px,92vw); background:#fff; border-radius:12px; padding:18px;
     box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:1000;
+    max-height:calc(100vh - 48px);
+    overflow-y:auto;
   }
   .modal input, .modal select{
     width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
@@ -301,10 +306,13 @@
 
     document.getElementById("overlayCaja").style.display = "block";
     document.getElementById("modalCaja").style.display = "block";
+    document.body.classList.add("modal-open");
+    document.getElementById("modalCaja").scrollTop = 0;
   }
   function cerrarModalCaja(){
     document.getElementById("overlayCaja").style.display = "none";
     document.getElementById("modalCaja").style.display = "none";
+    document.body.classList.remove("modal-open");
   }
 
   // ----- Modal Archivo -----
@@ -333,10 +341,13 @@
 
     document.getElementById("overlayArchivo").style.display = "block";
     document.getElementById("modalArchivo").style.display = "block";
+    document.body.classList.add("modal-open");
+    document.getElementById("modalArchivo").scrollTop = 0;
   }
   function cerrarModalArchivo(){
     document.getElementById("overlayArchivo").style.display = "none";
     document.getElementById("modalArchivo").style.display = "none";
+    document.body.classList.remove("modal-open");
   }
 
   // Cerrar al hacer clic en overlay

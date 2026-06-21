@@ -2166,7 +2166,7 @@ def archivo():
 
     archivador_mode = admin_requerido() and es_archivador_grupo(grupo_id)
     view_mode = request.args.get("view", "").strip()
-    import_job_id = session.get("last_import_job_id")
+    import_job_id = request.args.get("import_job", "").strip() or session.get("last_import_job_id")
     import_job = (get_import_job(import_job_id) or get_import_report(import_job_id)) if import_job_id else None
     recent_import_reports = get_recent_import_reports(8) if supervisor_requerido() else []
 
@@ -2298,7 +2298,7 @@ def archivo():
             t.start()
 
             flash("Importacion iniciada. Espera a que finalice la carga para continuar.", "info")
-            return redirect(url_for("archivo"))
+            return redirect(url_for("archivo", import_job=job_id))
 
         # ---------- Carga masiva PDF ----------
         if accion == "carga_masiva_pdf":

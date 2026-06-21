@@ -867,6 +867,9 @@ document.addEventListener("click", function (event) {
 
 document.getElementById("excelFileInput")?.addEventListener("change", function () {
   if (this.files && this.files.length > 0) {
+    if (typeof window.mostrarImportacionInmediata === "function") {
+      window.mostrarImportacionInmediata();
+    }
     document.getElementById("excelUploadForm").submit();
   }
 });

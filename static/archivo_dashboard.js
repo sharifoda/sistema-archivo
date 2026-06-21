@@ -15,6 +15,7 @@ const PDF_BULK_DATA = Array.isArray(data.pdfBulkData) ? data.pdfBulkData : [];
 let importStatusTimer = null;
 let importLastInserted = IMPORT_JOB && Number.isFinite(Number(IMPORT_JOB.inserted)) ? Number(IMPORT_JOB.inserted) : 0;
 let importCurrentJob = IMPORT_JOB || null;
+let importJustStarted = false;
 
 /* =========================
    Estado global de búsqueda
@@ -176,7 +177,7 @@ function renderImportProgressModal(job) {
   heading.textContent = job.status === "processing" || job.status === "pending"
     ? "Carga de Excel en progreso"
     : "Carga de Excel finalizada";
-  message.textContent = job.message || "Importacion en proceso.";
+  message.textContent = job.message || (importJustStarted ? "Preparando carga..." : "Importacion en proceso.");
   processed.textContent = formatMiles(processedRows);
   inserted.textContent = formatMiles(job.inserted || 0);
   ignored.textContent = formatMiles(job.ignored || 0);
@@ -191,7 +192,7 @@ function renderImportProgressModal(job) {
   if (job.error_code) {
     parts.push(`Error: ${job.error_code}`);
   }
-  detail.textContent = [job.detail || "", parts.join(" | ")].filter(Boolean).join(" | ");
+  detail.textContent = [job.detail || (importJustStarted ? "Subiendo archivo y creando tarea de importacion..." : ""), parts.join(" | ")].filter(Boolean).join(" | ");
 
   if (job.status === "processing" || job.status === "pending") {
     overlay.classList.add("visible");
@@ -310,6 +311,7 @@ async function pollImportStatus() {
     if (!response.ok) return;
     const payload = await response.json();
     if (!payload.ok || !payload.job) return;
+    importJustStarted = false;
     renderImportStatus(payload.job);
 
     const insertedNow = Number(payload.job.inserted || 0);
@@ -331,6 +333,26 @@ async function pollImportStatus() {
   } catch (error) {
     console.error("No se pudo consultar el estado de importacion", error);
   }
+}
+
+function mostrarImportacionInmediata() {
+  importJustStarted = true;
+  renderImportStatus({
+    job_id: "",
+    status: "pending",
+    message: "Importacion iniciada.",
+    total_rows: 0,
+    processed_rows: 0,
+    inserted: 0,
+    ignored: 0,
+    invalid: 0,
+    detail: "Subiendo archivo y preparando el analisis del Excel...",
+    user_name: "",
+    group_name: "",
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    error_code: null
+  });
 }
 
 /* =========================

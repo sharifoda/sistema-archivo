@@ -2,6 +2,10 @@ from db import get_db
 from historial import registrar_movimiento
 
 
+def _rowcount_or_zero(cur):
+    return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+
 def _get_caja_pendiente_id(cur, grupo_id):
     cur.execute(
         "SELECT id FROM cajas WHERE grupo_id = %s AND is_pendiente = 1",
@@ -138,39 +142,16 @@ def reubicar_archivos_pendientes_por_nueva_caja(caja_id, grupo_id, usuario_id=No
 
     cur.execute(
         """
-        SELECT id
-        FROM archivos
+        UPDATE archivos
+        SET caja_id = %s
         WHERE caja_id = %s
           AND grupo_id = %s
           AND numero BETWEEN %s AND %s
         """,
-        (pendiente_id, grupo_id, rmin, rmax)
+        (caja_id, pendiente_id, grupo_id, rmin, rmax)
     )
 
-    archivos = cur.fetchall()
-    contador = 0
-
-    for (archivo_id,) in archivos:
-        cur.execute(
-            "SELECT caja_id FROM archivos WHERE id = %s",
-            (archivo_id,)
-        )
-        before_caja = cur.fetchone()[0]
-
-        cur.execute(
-            "UPDATE archivos SET caja_id = %s WHERE id = %s",
-            (caja_id, archivo_id)
-        )
-        registrar_movimiento(
-            usuario_id,
-            grupo_id,
-            entidad="archivo",
-            entidad_id=archivo_id,
-            accion="ARCHIVO_MOVER",
-            datos_antes={"caja_id": before_caja},
-            datos_despues={"caja_id": caja_id},
-        )
-        contador += 1
+    contador = _rowcount_or_zero(cur)
 
     conn.commit()
     cur.close()
@@ -202,16 +183,15 @@ def modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, usuario_id=None):
     cur.close()
     conn.close()
 
-    if antes:
-        registrar_movimiento(
-            usuario_id,
-            grupo_id,
-            entidad="caja",
-            entidad_id=caja_id,
-            accion="MODIFICAR_CAJA",
-            datos_antes={"rango_min": antes[0], "rango_max": antes[1]},
-            datos_despues={"rango_min": nuevo_min, "rango_max": nuevo_max},
-        )
+    if not antes:
+        return None
+
+    return {
+        "rango_min": antes[0],
+        "rango_max": antes[1],
+        "nuevo_min": nuevo_min,
+        "nuevo_max": nuevo_max,
+    }
 
 
 def reubicar_archivos_de_caja(caja_id, grupo_id, usuario_id=None):
@@ -241,49 +221,26 @@ def reubicar_archivos_de_caja(caja_id, grupo_id, usuario_id=None):
 
     cur.execute(
         """
-        SELECT id, numero
-        FROM archivos
-        WHERE caja_id = %s
-          AND grupo_id = %s
-          AND NOT (%s <= numero AND numero <= %s)
+        UPDATE a
+        SET caja_id = COALESCE(dest.id, %s)
+        FROM archivos a
+        OUTER APPLY (
+            SELECT TOP 1 c.id
+            FROM cajas c
+            WHERE c.id <> %s
+              AND c.grupo_id = %s
+              AND c.is_pendiente = 0
+              AND a.numero BETWEEN c.rango_min AND c.rango_max
+            ORDER BY c.rango_min, c.id
+        ) dest
+        WHERE a.caja_id = %s
+          AND a.grupo_id = %s
+          AND NOT (%s <= a.numero AND a.numero <= %s)
         """,
-        (caja_id, grupo_id, rmin, rmax)
+        (pendiente_id, caja_id, grupo_id, caja_id, grupo_id, rmin, rmax)
     )
 
-    fuera = cur.fetchall()
-    contador = 0
-
-    for archivo_id, numero in fuera:
-        cur.execute(
-            """
-            SELECT TOP 1 id
-            FROM cajas
-            WHERE id <> %s
-              AND grupo_id = %s
-              AND is_pendiente = 0
-              AND %s BETWEEN rango_min AND rango_max
-            ORDER BY rango_min, id
-            """,
-            (caja_id, grupo_id, numero)
-        )
-
-        destino = cur.fetchone()
-        destino_id = destino[0] if destino else pendiente_id
-
-        cur.execute(
-            "UPDATE archivos SET caja_id = %s WHERE id = %s",
-            (destino_id, archivo_id)
-        )
-        registrar_movimiento(
-            usuario_id,
-            grupo_id,
-            entidad="archivo",
-            entidad_id=archivo_id,
-            accion="ARCHIVO_MOVER",
-            datos_antes={"caja_id": caja_id},
-            datos_despues={"caja_id": destino_id},
-        )
-        contador += 1
+    contador = _rowcount_or_zero(cur)
 
     conn.commit()
     cur.close()
@@ -301,47 +258,10 @@ def eliminar_caja(caja_id, grupo_id, usuario_id=None):
     """
     pendiente_id = asegurar_caja_sin_asignar(grupo_id)
     if caja_id == pendiente_id:
-        return
+        return None
 
     conn = get_db()
     cur = conn.cursor()
-
-    cur.execute(
-        "SELECT id, numero FROM archivos WHERE caja_id = %s AND grupo_id = %s",
-        (caja_id, grupo_id)
-    )
-    archivos = cur.fetchall()
-
-    for archivo_id, numero in archivos:
-        cur.execute(
-            """
-            SELECT TOP 1 id
-            FROM cajas
-            WHERE id <> %s
-              AND grupo_id = %s
-              AND is_pendiente = 0
-              AND %s BETWEEN rango_min AND rango_max
-            ORDER BY rango_min, id
-            """,
-            (caja_id, grupo_id, numero)
-        )
-
-        destino = cur.fetchone()
-        destino_id = destino[0] if destino else pendiente_id
-
-        cur.execute(
-            "UPDATE archivos SET caja_id = %s WHERE id = %s",
-            (destino_id, archivo_id)
-        )
-        registrar_movimiento(
-            usuario_id,
-            grupo_id,
-            entidad="archivo",
-            entidad_id=archivo_id,
-            accion="ARCHIVO_MOVER",
-            datos_antes={"caja_id": caja_id},
-            datos_despues={"caja_id": destino_id},
-        )
 
     cur.execute(
         "SELECT rango_min, rango_max FROM cajas WHERE id = %s AND grupo_id = %s",
@@ -349,18 +269,38 @@ def eliminar_caja(caja_id, grupo_id, usuario_id=None):
     )
     antes = cur.fetchone()
 
+    cur.execute(
+        """
+        UPDATE a
+        SET caja_id = COALESCE(dest.id, %s)
+        FROM archivos a
+        OUTER APPLY (
+            SELECT TOP 1 c.id
+            FROM cajas c
+            WHERE c.id <> %s
+              AND c.grupo_id = %s
+              AND c.is_pendiente = 0
+              AND a.numero BETWEEN c.rango_min AND c.rango_max
+            ORDER BY c.rango_min, c.id
+        ) dest
+        WHERE a.caja_id = %s
+          AND a.grupo_id = %s
+        """,
+        (pendiente_id, caja_id, grupo_id, caja_id, grupo_id)
+    )
+    reasignados = _rowcount_or_zero(cur)
+
     cur.execute("DELETE FROM cajas WHERE id = %s AND grupo_id = %s", (caja_id, grupo_id))
 
     conn.commit()
     cur.close()
     conn.close()
 
-    if antes:
-        registrar_movimiento(
-            usuario_id,
-            grupo_id,
-            entidad="caja",
-            entidad_id=caja_id,
-            accion="ELIMINAR_CAJA",
-            datos_antes={"rango_min": antes[0], "rango_max": antes[1]},
-        )
+    if not antes:
+        return None
+
+    return {
+        "rango_min": antes[0],
+        "rango_max": antes[1],
+        "reasignados": reasignados,
+    }

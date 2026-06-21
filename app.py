@@ -1173,9 +1173,14 @@ def grupos():
                 elif entidad == "caja" and accion == "CREAR_CAJA":
                     texto = f"Se creo la caja numero {caja_vis}"
                 elif entidad == "caja" and accion == "MODIFICAR_CAJA":
-                    texto = f"Se modifico la caja numero {caja_vis}"
+                    rango_old = f"{_fmt_num(antes.get('rango_min'))}-{_fmt_num(antes.get('rango_max'))}"
+                    rango_new = f"{_fmt_num(despues.get('rango_min'))}-{_fmt_num(despues.get('rango_max'))}"
+                    reasignados = despues.get("reasignados", 0)
+                    texto = f"MODIFICAR_CAJA masivo: {reasignados} archivos reasignados ({rango_old}) a ({rango_new}) en la caja {caja_vis}"
                 elif entidad == "caja" and accion == "ELIMINAR_CAJA":
-                    texto = f"Se elimino la caja numero {caja_vis}"
+                    reasignados = despues.get("reasignados", 0)
+                    rango_old = f"{_fmt_num(antes.get('rango_min'))}-{_fmt_num(antes.get('rango_max'))}"
+                    texto = f"ELIMINAR_CAJA masivo: {reasignados} archivos reasignados desde la caja {caja_vis} ({rango_old})"
                 else:
                     texto = f"{accion}"
 
@@ -1251,11 +1256,28 @@ def cajas():
                 flash_error(355, fallback="Solo el supervisor o admin puede eliminar cajas.")
                 return redirect(url_for("cajas"))
 
-            eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
+            caja_eliminada = eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
+
+            if caja_eliminada:
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="caja",
+                    entidad_id=caja_id,
+                    accion="ELIMINAR_CAJA",
+                    datos_antes={
+                        "rango_min": caja_eliminada["rango_min"],
+                        "rango_max": caja_eliminada["rango_max"],
+                    },
+                    datos_despues={
+                        "reasignados": caja_eliminada["reasignados"],
+                        "modo": "masivo",
+                    },
+                )
 
             registrar_log(
                 session.get("usuario_id"),
-                f"ELIMINAR_CAJA caja_id={caja_id}",
+                f"ELIMINAR_CAJA_MASIVO caja={caja_id} movidos={caja_eliminada['reasignados'] if caja_eliminada else 0}",
                 request.remote_addr,
                 grupo_id
             )
@@ -1275,7 +1297,7 @@ def cajas():
                 flash_error(204)
                 return redirect(url_for("cajas"))
 
-            modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
+            caja_antes = modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
 
             movidos_fuera = reubicar_archivos_de_caja(caja_id, grupo_id, session.get("usuario_id"))
             movidos_dentro = reubicar_archivos_pendientes_por_nueva_caja(
@@ -1297,9 +1319,28 @@ def cajas():
                     "info"
                 )
 
+            if caja_antes:
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="caja",
+                    entidad_id=caja_id,
+                    accion="MODIFICAR_CAJA",
+                    datos_antes={
+                        "rango_min": caja_antes["rango_min"],
+                        "rango_max": caja_antes["rango_max"],
+                    },
+                    datos_despues={
+                        "rango_min": caja_antes["nuevo_min"],
+                        "rango_max": caja_antes["nuevo_max"],
+                        "reasignados": total_movidos,
+                        "modo": "masivo",
+                    },
+                )
+
             registrar_log(
                 session.get("usuario_id"),
-                f"MODIFICAR_CAJA caja_id={caja_id} rango={nuevo_min}-{nuevo_max} reasignados={total_movidos}",
+                f"MODIFICAR_CAJA_MASIVO caja={caja_id} movidos={total_movidos}",
                 request.remote_addr,
                 grupo_id
             )
@@ -1783,9 +1824,14 @@ def archivos_legacy():
         elif entidad == "caja" and accion == "CREAR_CAJA":
             texto = f"Se creo la caja numero {caja_vis}"
         elif entidad == "caja" and accion == "MODIFICAR_CAJA":
-            texto = f"Se modifico la caja numero {caja_vis}"
+            rango_old = f"{_fmt_num(antes.get('rango_min'))}-{_fmt_num(antes.get('rango_max'))}"
+            rango_new = f"{_fmt_num(despues.get('rango_min'))}-{_fmt_num(despues.get('rango_max'))}"
+            reasignados = despues.get("reasignados", 0)
+            texto = f"MODIFICAR_CAJA masivo: {reasignados} archivos reasignados ({rango_old}) a ({rango_new}) en la caja {caja_vis}"
         elif entidad == "caja" and accion == "ELIMINAR_CAJA":
-            texto = f"Se elimino la caja numero {caja_vis}"
+            reasignados = despues.get("reasignados", 0)
+            rango_old = f"{_fmt_num(antes.get('rango_min'))}-{_fmt_num(antes.get('rango_max'))}"
+            texto = f"ELIMINAR_CAJA masivo: {reasignados} archivos reasignados desde la caja {caja_vis} ({rango_old})"
         else:
             texto = f"{accion}"
 
@@ -2603,7 +2649,7 @@ def archivo_caja(caja_id):
                 flash_error(204)
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
-            modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
+            caja_antes = modificar_caja(caja_id, nuevo_min, nuevo_max, grupo_id, session.get("usuario_id"))
 
             # Reubicar archivos segÃºn nuevo rango
             movidos_fuera = reubicar_archivos_de_caja(caja_id, grupo_id, session.get("usuario_id"))
@@ -2614,9 +2660,28 @@ def archivo_caja(caja_id):
             )
             total = movidos_fuera + movidos_dentro
 
+            if caja_antes:
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="caja",
+                    entidad_id=caja_id,
+                    accion="MODIFICAR_CAJA",
+                    datos_antes={
+                        "rango_min": caja_antes["rango_min"],
+                        "rango_max": caja_antes["rango_max"],
+                    },
+                    datos_despues={
+                        "rango_min": caja_antes["nuevo_min"],
+                        "rango_max": caja_antes["nuevo_max"],
+                        "reasignados": total,
+                        "modo": "masivo",
+                    },
+                )
+
             registrar_log(
                 session.get("usuario_id"),
-                f"MODIFICAR_CAJA caja_id={caja_id} rango={nuevo_min}-{nuevo_max} reasignados={total}",
+                f"MODIFICAR_CAJA_MASIVO caja={caja_id} movidos={total}",
                 request.remote_addr,
                 grupo_id
             )
@@ -2634,11 +2699,28 @@ def archivo_caja(caja_id):
                 flash_error(355, fallback="Solo el supervisor o admin puede eliminar cajas.")
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
-            eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
+            caja_eliminada = eliminar_caja(caja_id, grupo_id, session.get("usuario_id"))
+
+            if caja_eliminada:
+                registrar_movimiento(
+                    session.get("usuario_id"),
+                    grupo_id,
+                    entidad="caja",
+                    entidad_id=caja_id,
+                    accion="ELIMINAR_CAJA",
+                    datos_antes={
+                        "rango_min": caja_eliminada["rango_min"],
+                        "rango_max": caja_eliminada["rango_max"],
+                    },
+                    datos_despues={
+                        "reasignados": caja_eliminada["reasignados"],
+                        "modo": "masivo",
+                    },
+                )
 
             registrar_log(
                 session.get("usuario_id"),
-                f"ELIMINAR_CAJA caja_id={caja_id}",
+                f"ELIMINAR_CAJA_MASIVO caja={caja_id} movidos={caja_eliminada['reasignados'] if caja_eliminada else 0}",
                 request.remote_addr,
                 grupo_id
             )

@@ -32,11 +32,12 @@
     overflow:hidden;
   }
   .modal{
-    display:none; position:fixed; top:24px; left:50%; transform:translateX(-50%);
+    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%);
     width:min(520px,92vw); background:#fff; border-radius:12px; padding:18px;
     box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:1000;
-    max-height:calc(100vh - 48px);
+    max-height:min(760px, calc(100vh - 48px));
     overflow-y:auto;
+    overscroll-behavior:contain;
   }
   .modal input, .modal select{
     width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;

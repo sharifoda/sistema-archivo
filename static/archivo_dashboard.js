@@ -7,12 +7,14 @@ const data = JSON.parse(el.dataset.json);
 const URL_CAJA_BASE = data.urlCajaBase;
 const URL_PDF_BASE  = data.urlPdfBase;
 const IMPORT_STATUS_URL = data.importStatusUrl || "";
+const IMPORT_REPORT_URL_BASE = data.importReportUrlBase || "";
 const IMPORT_JOB = data.importJob || null;
 const resultado     = data.resultado;
 const csrfToken     = data.csrfToken || "";
 const PDF_BULK_DATA = Array.isArray(data.pdfBulkData) ? data.pdfBulkData : [];
 let importStatusTimer = null;
 let importLastInserted = IMPORT_JOB && Number.isFinite(Number(IMPORT_JOB.inserted)) ? Number(IMPORT_JOB.inserted) : 0;
+let importCurrentJob = IMPORT_JOB || null;
 
 /* =========================
    Estado global de búsqueda
@@ -96,7 +98,19 @@ function escapeAttr(value) {
     .replace(/>/g, "&gt;");
 }
 
+function formatDateTime(value) {
+  if (!value) return "N/D";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("es-CO");
+}
+
+function buildImportReportUrl(jobId) {
+  return IMPORT_REPORT_URL_BASE ? IMPORT_REPORT_URL_BASE.replace("__JOB__", String(jobId || "")) : "";
+}
+
 function renderImportStatus(job) {
+  importCurrentJob = job || null;
   const banner = document.getElementById("importStatusBanner");
   const title = document.getElementById("importStatusTitle");
   const meta = document.getElementById("importStatusMeta");
@@ -116,13 +130,174 @@ function renderImportStatus(job) {
   meta.innerHTML = [
     `Total filas: ${formatMiles(job.total_rows || 0)}`,
     `Procesadas: ${formatMiles(job.processed_rows || 0)}`,
-    `Nuevos: ${formatMiles(job.inserted || 0)}`,
-    `Ignorados: ${formatMiles(job.ignored || 0)}`,
+    `Exitosos: ${formatMiles(job.inserted || 0)}`,
+    `Repetidos: ${formatMiles(job.ignored || 0)}`,
     `Invalidos: ${formatMiles(job.invalid || 0)}`
   ]
     .map((item) => `<span>${item}</span>`)
     .join("");
   note.textContent = job.detail || "";
+
+  renderImportProgressModal(job);
+}
+
+function renderImportProgressModal(job) {
+  const overlay = document.getElementById("importProgressOverlay");
+  const modal = document.getElementById("importProgressModal");
+  const ring = document.getElementById("importProgressRing");
+  const percentEl = document.getElementById("importProgressPercent");
+  const heading = document.getElementById("importProgressHeading");
+  const message = document.getElementById("importProgressMessage");
+  const processed = document.getElementById("importProcessedValue");
+  const inserted = document.getElementById("importInsertedValue");
+  const ignored = document.getElementById("importIgnoredValue");
+  const invalid = document.getElementById("importInvalidValue");
+  const detail = document.getElementById("importProgressDetail");
+  const viewBtn = document.getElementById("importViewReportBtn");
+  const closeBtn = document.getElementById("importCloseProgressBtn");
+  if (!overlay || !modal || !ring || !percentEl || !heading || !message || !processed || !inserted || !ignored || !invalid || !detail || !viewBtn || !closeBtn) {
+    return;
+  }
+
+  if (!job) {
+    overlay.classList.remove("visible");
+    modal.classList.remove("visible");
+    return;
+  }
+
+  const total = Number(job.total_rows || 0);
+  const processedRows = Number(job.processed_rows || 0);
+  const percent = total > 0 ? Math.min(100, Math.round((processedRows / total) * 100)) : 0;
+  const progressDeg = `${Math.max(percent, job.status === "success" || job.status === "partial" ? 100 : 0) * 3.6}deg`;
+
+  ring.className = `import-progress-ring ${job.status || "processing"}`;
+  ring.style.setProperty("--progress", progressDeg);
+  percentEl.textContent = `${percent}%`;
+  heading.textContent = job.status === "processing" || job.status === "pending"
+    ? "Carga de Excel en progreso"
+    : "Carga de Excel finalizada";
+  message.textContent = job.message || "Importacion en proceso.";
+  processed.textContent = formatMiles(processedRows);
+  inserted.textContent = formatMiles(job.inserted || 0);
+  ignored.textContent = formatMiles(job.ignored || 0);
+  invalid.textContent = formatMiles(job.invalid || 0);
+
+  const parts = [
+    `Inicio: ${formatDateTime(job.started_at)}`,
+    `Fin: ${formatDateTime(job.finished_at)}`,
+    `Usuario: ${job.user_name || "N/D"}`,
+    `Empresa: ${job.group_name || "N/D"}`
+  ];
+  if (job.error_code) {
+    parts.push(`Error: ${job.error_code}`);
+  }
+  detail.textContent = [job.detail || "", parts.join(" | ")].filter(Boolean).join(" | ");
+
+  if (job.status === "processing" || job.status === "pending") {
+    overlay.classList.add("visible");
+    modal.classList.add("visible");
+    viewBtn.style.display = "none";
+    closeBtn.style.display = "none";
+    document.body.classList.add("dashboard-modal-open");
+    return;
+  }
+
+  overlay.classList.add("visible");
+  modal.classList.add("visible");
+  viewBtn.style.display = job.job_id ? "inline-flex" : "none";
+  closeBtn.style.display = "inline-flex";
+  document.body.classList.add("dashboard-modal-open");
+}
+
+function cerrarImportProgressModal() {
+  const overlay = document.getElementById("importProgressOverlay");
+  const modal = document.getElementById("importProgressModal");
+  if (overlay) overlay.classList.remove("visible");
+  if (modal) modal.classList.remove("visible");
+  document.body.classList.remove("dashboard-modal-open");
+}
+
+async function verInformeImportacion(jobId) {
+  const url = buildImportReportUrl(jobId);
+  if (!url) return;
+  try {
+    const response = await fetch(url, {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      alert("No se pudo cargar el informe.");
+      return;
+    }
+    const payload = await response.json();
+    if (!payload.ok || !payload.report) {
+      alert("No se pudo cargar el informe.");
+      return;
+    }
+    renderImportReport(payload.report);
+  } catch (error) {
+    console.error("No se pudo cargar el informe", error);
+    alert("No se pudo cargar el informe.");
+  }
+}
+
+function verInformeImportacionActual() {
+  if (!importCurrentJob || !importCurrentJob.job_id) return;
+  verInformeImportacion(importCurrentJob.job_id);
+}
+
+function renderImportReport(report) {
+  const overlay = document.getElementById("importReportOverlay");
+  const modal = document.getElementById("importReportModal");
+  const content = document.getElementById("importReportContent");
+  if (!overlay || !modal || !content) return;
+
+  const invalidList = Array.isArray(report.invalid_details) && report.invalid_details.length
+    ? `
+      <div class="import-progress-detail">
+        <strong>Invalidos detectados</strong>
+        <ul class="report-invalid-list">
+          ${report.invalid_details.map((item) => `<li>${escapeAttr(item)}</li>`).join("")}
+        </ul>
+      </div>
+    `
+    : `<div class="import-progress-detail"><strong>Invalidos detectados</strong><div>No hubo registros invalidos.</div></div>`;
+
+  content.innerHTML = `
+    <div class="import-progress-grid">
+      <div class="import-progress-stat"><strong>Archivo</strong><span style="font-size:14px;">${escapeAttr(report.source_filename || "N/D")}</span></div>
+      <div class="import-progress-stat"><strong>Estado</strong><span style="font-size:14px;">${escapeAttr(String(report.status || "").toUpperCase())}</span></div>
+      <div class="import-progress-stat"><strong>Usuario</strong><span style="font-size:14px;">${escapeAttr(report.user_name || "N/D")}</span></div>
+      <div class="import-progress-stat"><strong>Empresa</strong><span style="font-size:14px;">${escapeAttr(report.group_name || "N/D")}</span></div>
+      <div class="import-progress-stat"><strong>Total filas</strong><span>${formatMiles(report.total_rows || 0)}</span></div>
+      <div class="import-progress-stat"><strong>Procesados</strong><span>${formatMiles(report.processed_rows || 0)}</span></div>
+      <div class="import-progress-stat"><strong>Exitosos</strong><span>${formatMiles(report.inserted || 0)}</span></div>
+      <div class="import-progress-stat"><strong>Repetidos</strong><span>${formatMiles(report.ignored || 0)}</span></div>
+      <div class="import-progress-stat"><strong>Invalidos</strong><span>${formatMiles(report.invalid || 0)}</span></div>
+      <div class="import-progress-stat"><strong>Error</strong><span style="font-size:14px;">${report.error_code ? "ERROR " + report.error_code : "Sin error"}</span></div>
+      <div class="import-progress-stat"><strong>Inicio</strong><span style="font-size:14px;">${escapeAttr(formatDateTime(report.started_at))}</span></div>
+      <div class="import-progress-stat"><strong>Fin</strong><span style="font-size:14px;">${escapeAttr(formatDateTime(report.finished_at))}</span></div>
+    </div>
+    <div class="import-progress-detail" style="margin-top:14px;">
+      <strong>Resumen</strong>
+      <div style="margin-top:6px;">${escapeAttr(report.detail || "Sin observaciones.")}</div>
+    </div>
+    ${invalidList}
+  `;
+
+  overlay.style.display = "block";
+  modal.style.display = "block";
+  document.body.classList.add("dashboard-modal-open");
+}
+
+function cerrarInformeImportacion() {
+  const overlay = document.getElementById("importReportOverlay");
+  const modal = document.getElementById("importReportModal");
+  if (overlay) overlay.style.display = "none";
+  if (modal) modal.style.display = "none";
+  if (!document.getElementById("importProgressModal")?.classList.contains("visible")) {
+    document.body.classList.remove("dashboard-modal-open");
+  }
 }
 
 async function pollImportStatus() {
@@ -138,19 +313,20 @@ async function pollImportStatus() {
     renderImportStatus(payload.job);
 
     const insertedNow = Number(payload.job.inserted || 0);
-    if (insertedNow > importLastInserted) {
-      importLastInserted = insertedNow;
-      window.setTimeout(() => window.location.reload(), 400);
-      return;
-    }
+    importLastInserted = Math.max(importLastInserted, insertedNow);
 
     if (payload.job.status === "processing" || payload.job.status === "pending") {
-      importStatusTimer = window.setTimeout(pollImportStatus, 2500);
+      importStatusTimer = window.setTimeout(pollImportStatus, 1400);
       return;
     }
 
     if (payload.job.status === "success" || payload.job.status === "partial") {
-      window.setTimeout(() => window.location.reload(), 1500);
+      window.setTimeout(() => window.location.reload(), 900);
+      return;
+    }
+
+    if (payload.job.status === "failed") {
+      window.setTimeout(() => window.location.reload(), 900);
     }
   } catch (error) {
     console.error("No se pudo consultar el estado de importacion", error);
@@ -209,7 +385,7 @@ if (editarAppendInput && editarRemoveInput) {
   });
 }
 
-["overlayPdfDownload", "modalPdfDownload"].forEach((id) => {
+["overlayPdfDownload", "modalPdfDownload", "importReportOverlay", "importReportModal", "importProgressOverlay", "importProgressModal"].forEach((id) => {
   const el = document.getElementById(id);
   if (el && el.parentElement !== document.body) {
     document.body.appendChild(el);
@@ -228,6 +404,10 @@ document.addEventListener("click", function (e) {
       cerrarModal(tipo, tipo === "Buscar");
     }
   });
+
+  if (e.target === document.getElementById("importReportOverlay")) {
+    cerrarInformeImportacion();
+  }
 });
 
 // Cerrar con ESC

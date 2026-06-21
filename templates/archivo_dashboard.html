@@ -24,6 +24,7 @@
   }
   .btn-danger{ border-color:#b00020; color:#b00020; }
   .btn-disabled{ opacity:.55; cursor:not-allowed; }
+  body.dashboard-modal-open{ overflow:hidden; }
 
   .grid{
     display:grid;
@@ -309,6 +310,186 @@
     font-size:13px;
     opacity:.95;
   }
+  .import-progress-overlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(8, 24, 43, 0.50);
+    backdrop-filter:blur(6px);
+    z-index:12000;
+  }
+  .import-progress-overlay.visible{
+    display:block;
+  }
+  .import-progress-modal{
+    display:none;
+    position:fixed;
+    top:50%;
+    left:50%;
+    transform:translate(-50%, -50%);
+    width:min(560px, 92vw);
+    padding:24px;
+    border-radius:22px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(244,248,251,0.96));
+    box-shadow:0 24px 48px rgba(7, 32, 56, 0.22);
+    z-index:12001;
+  }
+  .import-progress-modal.visible{
+    display:block;
+  }
+  .import-progress-head{
+    display:flex;
+    gap:18px;
+    align-items:center;
+  }
+  .import-progress-ring{
+    --progress: 0deg;
+    width:108px;
+    height:108px;
+    border-radius:50%;
+    background:
+      radial-gradient(circle at center, #fff 57%, transparent 58%),
+      conic-gradient(#11c5d9 var(--progress), rgba(17, 197, 217, 0.16) 0deg);
+    display:grid;
+    place-items:center;
+    flex:0 0 auto;
+  }
+  .import-progress-ring.processing{
+    background:
+      radial-gradient(circle at center, #fff 57%, transparent 58%),
+      conic-gradient(#11c5d9 var(--progress), rgba(17, 197, 217, 0.16) 0deg);
+  }
+  .import-progress-ring.success{
+    background:
+      radial-gradient(circle at center, #fff 57%, transparent 58%),
+      conic-gradient(#0fa77a var(--progress), rgba(15, 167, 122, 0.16) 0deg);
+  }
+  .import-progress-ring.partial{
+    background:
+      radial-gradient(circle at center, #fff 57%, transparent 58%),
+      conic-gradient(#d98e04 var(--progress), rgba(217, 142, 4, 0.16) 0deg);
+  }
+  .import-progress-ring.failed{
+    background:
+      radial-gradient(circle at center, #fff 57%, transparent 58%),
+      conic-gradient(#c94b4b var(--progress), rgba(201, 75, 75, 0.16) 0deg);
+  }
+  .import-progress-percent{
+    font-size:24px;
+    font-weight:800;
+    color:#0c2d57;
+  }
+  .import-progress-copy h3{
+    margin:0 0 6px;
+  }
+  .import-progress-copy p{
+    margin:0;
+    color:#5a6a7f;
+  }
+  .import-progress-grid{
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:10px;
+    margin-top:18px;
+  }
+  .import-progress-stat{
+    padding:12px 14px;
+    border:1px solid #d7e0e8;
+    border-radius:14px;
+    background:#fff;
+  }
+  .import-progress-stat strong{
+    display:block;
+    margin-bottom:4px;
+    font-size:12px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:#5a6a7f;
+  }
+  .import-progress-stat span{
+    font-size:20px;
+    font-weight:800;
+    color:#102033;
+  }
+  .import-progress-detail{
+    margin-top:16px;
+    padding:14px;
+    border:1px solid #d7e0e8;
+    border-radius:16px;
+    background:#fff;
+    color:#38516b;
+    font-size:14px;
+  }
+  .import-progress-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    margin-top:18px;
+    flex-wrap:wrap;
+  }
+  .import-reports{
+    margin:0 0 18px;
+    padding:16px;
+    border:1px solid #d7e0e8;
+    border-radius:18px;
+    background:rgba(255,255,255,0.84);
+  }
+  .import-reports h3{
+    margin:0 0 12px;
+  }
+  .import-reports-list{
+    display:grid;
+    gap:10px;
+  }
+  .import-report-card{
+    display:grid;
+    grid-template-columns:1fr auto;
+    gap:12px;
+    align-items:center;
+    padding:14px;
+    border:1px solid #d7e0e8;
+    border-radius:14px;
+    background:#fff;
+  }
+  .import-report-card strong{
+    display:block;
+    color:#173b69;
+  }
+  .import-report-meta{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-top:6px;
+    font-size:12px;
+    color:#5a6a7f;
+  }
+  .report-status-pill{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:6px 10px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:700;
+    border:1px solid #d7e0e8;
+    background:#f5f8fc;
+    color:#173b69;
+  }
+  .report-status-pill.success{ background:#ecfbf1; color:#185533; border-color:#8cd5a5; }
+  .report-status-pill.partial{ background:#fff8e7; color:#6f4a00; border-color:#f0cf85; }
+  .report-status-pill.failed{ background:#fff0f0; color:#8a1f1f; border-color:#e3a0a0; }
+  .report-status-pill.processing,
+  .report-status-pill.pending{ background:#eaf4ff; color:#173b69; border-color:#8bc4ff; }
+  .report-invalid-list{
+    margin:12px 0 0;
+    padding-left:18px;
+    max-height:180px;
+    overflow:auto;
+  }
+  .report-invalid-list li{
+    margin-bottom:6px;
+    color:#7a2630;
+  }
 </style>
 
 <h2>📂 Archivo</h2>
@@ -317,6 +498,69 @@
   <span class="import-status-title" id="importStatusTitle"></span>
   <div class="import-status-meta" id="importStatusMeta"></div>
   <div class="import-status-note" id="importStatusNote"></div>
+</div>
+
+{% if session.get("rol") in ["admin", "supervisor"] and recent_import_reports %}
+<section class="import-reports">
+  <h3>Informes recientes de Excel</h3>
+  <div class="import-reports-list">
+    {% for report in recent_import_reports %}
+    <div class="import-report-card">
+      <div>
+        <strong>{{ report.source_filename or ("Importacion " ~ report.job_id[:8]) }}</strong>
+        <div class="import-report-meta">
+          <span>{{ report.user_name or "Sin usuario" }}</span>
+          <span>{{ report.group_name or "Sin empresa" }}</span>
+          <span>Filas: {{ report.total_rows }}</span>
+          <span>Exitosos: {{ report.inserted }}</span>
+          <span>Ignorados: {{ report.ignored }}</span>
+          <span>Invalidos: {{ report.invalid }}</span>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+        <span class="report-status-pill {{ report.status }}">{{ report.status|upper }}</span>
+        <button class="btn btn-small" type="button" onclick="verInformeImportacion('{{ report.job_id }}')">Ver informe</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<div id="importProgressOverlay" class="import-progress-overlay"></div>
+<div id="importProgressModal" class="import-progress-modal" role="dialog" aria-modal="true" aria-labelledby="importProgressHeading">
+  <div class="import-progress-head">
+    <div id="importProgressRing" class="import-progress-ring processing">
+      <span id="importProgressPercent" class="import-progress-percent">0%</span>
+    </div>
+    <div class="import-progress-copy">
+      <h3 id="importProgressHeading">Importacion de Excel</h3>
+      <p id="importProgressMessage">Preparando carga...</p>
+    </div>
+  </div>
+
+  <div class="import-progress-grid">
+    <div class="import-progress-stat"><strong>Procesados</strong><span id="importProcessedValue">0</span></div>
+    <div class="import-progress-stat"><strong>Exitosos</strong><span id="importInsertedValue">0</span></div>
+    <div class="import-progress-stat"><strong>Repetidos</strong><span id="importIgnoredValue">0</span></div>
+    <div class="import-progress-stat"><strong>Invalidos</strong><span id="importInvalidValue">0</span></div>
+  </div>
+
+  <div id="importProgressDetail" class="import-progress-detail">Espera a que finalice la carga.</div>
+
+  <div class="import-progress-actions">
+    <button id="importViewReportBtn" type="button" class="btn" style="display:none;" onclick="verInformeImportacionActual()">Ver informe</button>
+    <button id="importCloseProgressBtn" type="button" class="btn btn-primary" style="display:none;" onclick="cerrarImportProgressModal()">Cerrar</button>
+  </div>
+</div>
+
+<div id="importReportOverlay" class="modal-overlay"></div>
+<div id="importReportModal" class="modal" style="width:min(760px,94vw); max-height:85vh; overflow:auto;">
+  <h3>Informe de importacion Excel</h3>
+  <div id="importReportContent" style="margin-top:12px;"></div>
+  <div class="actions">
+    <button type="button" class="btn" onclick="cerrarInformeImportacion()">Cerrar</button>
+  </div>
 </div>
 
 {% if archivador_mode %}
@@ -560,6 +804,7 @@
        "urlCajaBase": url_for("archivo_caja", caja_id=0),
        "urlPdfBase":  url_for("ver_pdf", numero=0),
        "importStatusUrl": import_status_url,
+       "importReportUrlBase": import_report_url_base,
        "importJob": import_job,
        "resultado":   resultado,
        "csrfToken":   csrf_token(),

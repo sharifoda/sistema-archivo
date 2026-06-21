@@ -75,6 +75,226 @@ def flash_error(code, fallback=None, detail=None):
     flash(error_text(code, fallback=fallback, detail=detail), "error")
 
 
+def ensure_import_reports_table():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        IF OBJECT_ID('dbo.importaciones_excel', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.importaciones_excel (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                job_id NVARCHAR(64) NOT NULL UNIQUE,
+                usuarioid INT NULL,
+                nombreusuario NVARCHAR(255) NULL,
+                empresa INT NULL,
+                nombreempresa NVARCHAR(255) NULL,
+                archivo_nombre NVARCHAR(255) NULL,
+                status NVARCHAR(20) NOT NULL,
+                error_code INT NULL,
+                total_rows INT NOT NULL CONSTRAINT DF_importaciones_excel_total_rows DEFAULT (0),
+                processed_rows INT NOT NULL CONSTRAINT DF_importaciones_excel_processed_rows DEFAULT (0),
+                inserted INT NOT NULL CONSTRAINT DF_importaciones_excel_inserted DEFAULT (0),
+                ignored INT NOT NULL CONSTRAINT DF_importaciones_excel_ignored DEFAULT (0),
+                invalid INT NOT NULL CONSTRAINT DF_importaciones_excel_invalid DEFAULT (0),
+                invalid_details NVARCHAR(MAX) NULL,
+                detail NVARCHAR(MAX) NULL,
+                started_at DATETIME2 NULL,
+                finished_at DATETIME2 NULL,
+                created_at DATETIME2 NOT NULL CONSTRAINT DF_importaciones_excel_created_at DEFAULT (SYSDATETIME())
+            );
+        END
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _json_loads_safe(value, default):
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
+def persist_import_report(job):
+    ensure_import_reports_table()
+    conn = get_db()
+    cur = conn.cursor()
+    invalid_details_text = json.dumps(job.get("invalid_details") or [], ensure_ascii=False)
+    cur.execute("SELECT 1 FROM importaciones_excel WHERE job_id = %s", (job["job_id"],))
+    exists = cur.fetchone()
+    if exists:
+        cur.execute(
+            """
+            UPDATE importaciones_excel
+            SET usuarioid = %s,
+                nombreusuario = %s,
+                empresa = %s,
+                nombreempresa = %s,
+                archivo_nombre = %s,
+                status = %s,
+                error_code = %s,
+                total_rows = %s,
+                processed_rows = %s,
+                inserted = %s,
+                ignored = %s,
+                invalid = %s,
+                invalid_details = %s,
+                detail = %s,
+                started_at = %s,
+                finished_at = %s
+            WHERE job_id = %s
+            """,
+            (
+                job.get("user_id"),
+                job.get("user_name"),
+                job.get("group_id"),
+                job.get("group_name"),
+                job.get("source_filename"),
+                job.get("status"),
+                job.get("error_code"),
+                job.get("total_rows", 0),
+                job.get("processed_rows", 0),
+                job.get("inserted", 0),
+                job.get("ignored", 0),
+                job.get("invalid", 0),
+                invalid_details_text,
+                job.get("detail", ""),
+                job.get("started_at"),
+                job.get("finished_at"),
+                job["job_id"],
+            ),
+        )
+    else:
+        cur.execute(
+            """
+            INSERT INTO importaciones_excel (
+                job_id, usuarioid, nombreusuario, empresa, nombreempresa, archivo_nombre,
+                status, error_code, total_rows, processed_rows, inserted, ignored, invalid,
+                invalid_details, detail, started_at, finished_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                job["job_id"],
+                job.get("user_id"),
+                job.get("user_name"),
+                job.get("group_id"),
+                job.get("group_name"),
+                job.get("source_filename"),
+                job.get("status"),
+                job.get("error_code"),
+                job.get("total_rows", 0),
+                job.get("processed_rows", 0),
+                job.get("inserted", 0),
+                job.get("ignored", 0),
+                job.get("invalid", 0),
+                invalid_details_text,
+                job.get("detail", ""),
+                job.get("started_at"),
+                job.get("finished_at"),
+            ),
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_import_report(job_id):
+    ensure_import_reports_table()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            job_id, usuarioid, nombreusuario, empresa, nombreempresa, archivo_nombre,
+            status, error_code, total_rows, processed_rows, inserted, ignored, invalid,
+            invalid_details, detail, started_at, finished_at, created_at
+        FROM importaciones_excel
+        WHERE job_id = %s
+        """,
+        (job_id,)
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "job_id": row[0],
+        "user_id": row[1],
+        "user_name": row[2],
+        "group_id": row[3],
+        "group_name": row[4],
+        "source_filename": row[5],
+        "status": row[6],
+        "error_code": row[7],
+        "total_rows": row[8],
+        "processed_rows": row[9],
+        "inserted": row[10],
+        "ignored": row[11],
+        "invalid": row[12],
+        "invalid_details": _json_loads_safe(row[13], []),
+        "detail": row[14] or "",
+        "started_at": row[15].isoformat() if row[15] else None,
+        "finished_at": row[16].isoformat() if row[16] else None,
+        "created_at": row[17].isoformat() if row[17] else None,
+    }
+
+
+def get_recent_import_reports(limit=10):
+    ensure_import_reports_table()
+    conn = get_db()
+    cur = conn.cursor()
+    limit = max(1, int(limit))
+    cur.execute(
+        f"""
+        SELECT TOP {limit}
+            job_id, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
+            total_rows, processed_rows, inserted, ignored, invalid, started_at, finished_at
+        FROM importaciones_excel
+        ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC
+        """
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {
+            "job_id": r[0],
+            "user_name": r[1],
+            "group_name": r[2],
+            "source_filename": r[3],
+            "status": r[4],
+            "error_code": r[5],
+            "total_rows": r[6],
+            "processed_rows": r[7],
+            "inserted": r[8],
+            "ignored": r[9],
+            "invalid": r[10],
+            "started_at": r[11].isoformat() if r[11] else None,
+            "finished_at": r[12].isoformat() if r[12] else None,
+        }
+        for r in rows
+    ]
+
+
+def get_group_name(group_id):
+    if not group_id:
+        return ""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT nombre FROM empresas WHERE id = %s", (group_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row[0] if row else ""
+
+
 def build_import_job_payload(job_id, **extra):
     payload = {
         "job_id": job_id,
@@ -86,9 +306,17 @@ def build_import_job_payload(job_id, **extra):
         "inserted": 0,
         "ignored": 0,
         "invalid": 0,
+        "invalid_details": [],
         "detail": "",
+        "source_filename": "",
+        "user_id": None,
+        "user_name": "",
+        "group_id": None,
+        "group_name": "",
+        "started_at": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
         "finished_at": None,
+        "report_saved": False,
     }
     payload.update(extra)
     return payload
@@ -106,6 +334,20 @@ def get_import_job(job_id):
     with IMPORT_JOBS_LOCK:
         job = IMPORT_JOBS.get(job_id)
         return dict(job) if job else None
+
+
+def add_invalid_detail(invalid_details, value, row_number=None, reason=None, max_items=150):
+    if len(invalid_details) >= max_items:
+        return
+    raw = "" if value is None else str(value).strip()
+    if not raw:
+        raw = f"fila {row_number}" if row_number is not None else "valor vacio"
+    detail = raw
+    if row_number is not None:
+        detail = f"Fila {row_number}: {detail}"
+    if reason:
+        detail = f"{detail} ({reason})"
+    invalid_details.append(detail)
 
 def csrf_token():
     token = session.get("_csrf_token")
@@ -135,14 +377,32 @@ def importacion_estado(job_id):
         return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
 
     current_job_id = session.get("last_import_job_id")
-    if current_job_id != job_id and not admin_requerido():
+    if current_job_id != job_id and not supervisor_requerido():
         return jsonify({"ok": False, "error": error_text(206)}), 403
 
     job = get_import_job(job_id)
     if not job:
+        job = get_import_report(job_id)
+    if not job:
         return jsonify({"ok": False, "error": error_text(750)}), 404
 
     return jsonify({"ok": True, "job": job})
+
+
+@app.route("/importacion/reporte/<job_id>")
+def importacion_reporte(job_id):
+    if not login_requerido():
+        return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
+
+    current_job_id = session.get("last_import_job_id")
+    if current_job_id != job_id and not supervisor_requerido():
+        return jsonify({"ok": False, "error": error_text(206)}), 403
+
+    job = get_import_job(job_id) or get_import_report(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": error_text(750)}), 404
+
+    return jsonify({"ok": True, "report": job})
 
 def normalizar_nombre(nombre):
     return nombre.upper() if nombre else nombre
@@ -387,8 +647,10 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
         inserted=0,
         ignored=0,
         invalid=0,
+        invalid_details=[],
         error_code=None,
         finished_at=None,
+        report_saved=False,
     )
     try:
         wb = load_workbook(file_path, data_only=True)
@@ -400,7 +662,13 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
             message=error_text(501),
             error_code=501,
             finished_at=datetime.utcnow().isoformat(),
+            report_saved=True,
         )
+        persist_import_report(get_import_job(job_id))
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
         return
 
     ws = wb.active
@@ -455,14 +723,18 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
 
             values = []
             invalidos = 0
+            invalid_details = []
             for row in range(2, max_row + 1):
                 tipo_doc = normalizar_tipo_doc(ws.cell(row=row, column=tipo_idx).value)
+                numero_raw = ws.cell(row=row, column=doc_idx).value
                 if not es_tipo_doc_valido(tipo_doc):
                     invalidos += 1
+                    add_invalid_detail(invalid_details, numero_raw, row_number=row, reason="tipo_doc invalido")
                     continue
-                numero = _clean_num(ws.cell(row=row, column=doc_idx).value)
+                numero = _clean_num(numero_raw)
                 if not numero:
                     invalidos += 1
+                    add_invalid_detail(invalid_details, numero_raw, row_number=row, reason="documento invalido")
                     continue
 
                 parts = []
@@ -492,9 +764,12 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
                     inserted=0,
                     ignored=0,
                     invalid=invalidos,
+                    invalid_details=invalid_details,
                     error_code=503,
                     finished_at=datetime.utcnow().isoformat(),
+                    report_saved=True,
                 )
+                persist_import_report(get_import_job(job_id))
                 return
 
             inserted = 0
@@ -529,6 +804,7 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
                     inserted=inserted,
                     ignored=ignorados,
                     invalid=invalidos,
+                    invalid_details=invalid_details,
                     detail=f"Nuevos archivos: {inserted} | Ignorados: {ignorados} | Invalidos: {invalidos}",
                 )
 
@@ -546,10 +822,13 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
                 inserted=inserted,
                 ignored=ignorados,
                 invalid=invalidos,
+                invalid_details=invalid_details,
                 error_code=None if final_status == "success" else 503,
                 detail=detail,
                 finished_at=datetime.utcnow().isoformat(),
+                report_saved=True,
             )
+            persist_import_report(get_import_job(job_id))
         except Exception:
             conn.rollback()
             app.logger.exception("Error importando Excel (formato filas)")
@@ -560,7 +839,9 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
                 processed_rows=total_rows,
                 error_code=504,
                 finished_at=datetime.utcnow().isoformat(),
+                report_saved=True,
             )
+            persist_import_report(get_import_job(job_id))
         finally:
             cur.close()
             conn.close()
@@ -574,6 +855,8 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
     # Aunque el Excel venga separado por columnas, no se crean cajas desde la importacion.
     # Todo entra a Caja 0 y luego las cajas reales reubican los documentos automaticamente.
     columnas = []
+    invalidos = 0
+    invalid_details = []
     for col in range(1, max_col + 1):
         header = ws.cell(row=1, column=col).value
         if header is None or str(header).strip() == "":
@@ -583,6 +866,9 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
             cell_val = ws.cell(row=row, column=col).value
             num = _clean_num(cell_val)
             if not num:
+                if cell_val not in (None, ""):
+                    invalidos += 1
+                    add_invalid_detail(invalid_details, cell_val, row_number=row, reason="documento invalido")
                 continue
             numeros.append(num)
         columnas.append((col, str(header).strip(), numeros))
@@ -596,10 +882,13 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
             processed_rows=total_rows,
             inserted=0,
             ignored=0,
-            invalid=total_rows,
+            invalid=invalidos or total_rows,
+            invalid_details=invalid_details,
             error_code=503,
             finished_at=datetime.utcnow().isoformat(),
+            report_saved=True,
         )
+        persist_import_report(get_import_job(job_id))
         return
 
     conn = get_db()
@@ -613,7 +902,7 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
         numeros = sorted(set(numeros))
         inserted = 0
         ignorados = 0
-        procesados = max(total_rows - len(numeros), 0)
+        procesados = invalidos
         for chunk in iter_chunks(numeros, size=500):
             rows, ignored_chunk = insertar_archivos_lote(
                 cur,
@@ -640,17 +929,16 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
                 insertar_movimientos_lote(cur, mov_values)
 
             conn.commit()
-            invalidos = max(total_rows - len(numeros), 0)
             set_import_job(
                 job_id,
                 processed_rows=min(procesados, total_rows),
                 inserted=inserted,
                 ignored=ignorados,
                 invalid=invalidos,
+                invalid_details=invalid_details,
                 detail=f"Nuevos archivos: {inserted} | Ignorados: {ignorados} | Invalidos: {invalidos}",
             )
 
-        invalidos = max(total_rows - len(numeros), 0)
         final_status = "success" if not invalidos and not ignorados else "partial"
         detail = f"Nuevos archivos: {inserted} | Ignorados: {ignorados} | Invalidos: {invalidos}"
         set_import_job(
@@ -665,10 +953,13 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
             inserted=inserted,
             ignored=ignorados,
             invalid=invalidos,
+            invalid_details=invalid_details,
             error_code=None if final_status == "success" else 503,
             detail=detail,
             finished_at=datetime.utcnow().isoformat(),
+            report_saved=True,
         )
+        persist_import_report(get_import_job(job_id))
     except Exception:
         conn.rollback()
         app.logger.exception("Error importando Excel")
@@ -679,7 +970,9 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
             processed_rows=total_rows,
             error_code=504,
             finished_at=datetime.utcnow().isoformat(),
+            report_saved=True,
         )
+        persist_import_report(get_import_job(job_id))
     finally:
         cur.close()
         conn.close()
@@ -1865,7 +2158,8 @@ def archivo():
     archivador_mode = admin_requerido() and es_archivador_grupo(grupo_id)
     view_mode = request.args.get("view", "").strip()
     import_job_id = session.get("last_import_job_id")
-    import_job = get_import_job(import_job_id) if import_job_id else None
+    import_job = (get_import_job(import_job_id) or get_import_report(import_job_id)) if import_job_id else None
+    recent_import_reports = get_recent_import_reports(8) if supervisor_requerido() else []
 
     if request.method == "GET" and archivador_mode and view_mode == "especial":
         conn = get_db()
@@ -1973,11 +2267,18 @@ def archivo():
             file_path = os.path.join(uploads_dir, filename)
             excel_file.save(file_path)
             job_id = uuid.uuid4().hex
+            group_name = get_group_name(grupo_id)
             session["last_import_job_id"] = job_id
             set_import_job(
                 job_id,
                 status="pending",
                 message="Importacion iniciada.",
+                source_filename=excel_file.filename,
+                user_id=session.get("usuario_id"),
+                user_name=session.get("usuario"),
+                group_id=grupo_id,
+                group_name=group_name,
+                started_at=datetime.utcnow().isoformat(),
             )
 
             t = threading.Thread(
@@ -1987,7 +2288,7 @@ def archivo():
             )
             t.start()
 
-            flash("Importacion iniciada. Puedes seguir usando el sistema.", "info")
+            flash("Importacion iniciada. Espera a que finalice la carga para continuar.", "info")
             return redirect(url_for("archivo"))
 
         # ---------- Carga masiva PDF ----------
@@ -2617,7 +2918,9 @@ def archivo():
         archivador_mode=archivador_mode,
         pdf_bulk_data=pdf_bulk_data,
         import_job=import_job,
+        recent_import_reports=recent_import_reports,
         import_status_url=url_for("importacion_estado", job_id=import_job_id) if import_job_id else None,
+        import_report_url_base=url_for("importacion_reporte", job_id="__JOB__"),
     )
 
 # ---------------- archivo_caja ----------------

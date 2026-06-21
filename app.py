@@ -70,6 +70,7 @@ app.config["ADMIN_BULK_DELETE_PASSWORD"] = os.environ.get("ADMIN_BULK_DELETE_PAS
 
 IMPORT_JOBS = {}
 IMPORT_JOBS_LOCK = threading.Lock()
+IMPORT_REPORTS_TABLE_READY = False
 
 
 def flash_error(code, fallback=None, detail=None):
@@ -77,6 +78,9 @@ def flash_error(code, fallback=None, detail=None):
 
 
 def ensure_import_reports_table():
+    global IMPORT_REPORTS_TABLE_READY
+    if IMPORT_REPORTS_TABLE_READY:
+        return
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
@@ -110,6 +114,7 @@ def ensure_import_reports_table():
     conn.commit()
     cur.close()
     conn.close()
+    IMPORT_REPORTS_TABLE_READY = True
 
 
 def _json_loads_safe(value, default):
@@ -121,7 +126,9 @@ def _json_loads_safe(value, default):
         return default
 
 
-def persist_import_report(job):
+def _save_import_report(job):
+    if not job or not job.get("job_id"):
+        return
     ensure_import_reports_table()
     conn = get_db()
     cur = conn.cursor()
@@ -203,6 +210,10 @@ def persist_import_report(job):
     conn.commit()
     cur.close()
     conn.close()
+
+
+def persist_import_report(job):
+    _save_import_report(job)
 
 
 def get_import_report(job_id):
@@ -328,7 +339,12 @@ def set_import_job(job_id, **updates):
         current = IMPORT_JOBS.get(job_id, build_import_job_payload(job_id))
         current.update(updates)
         IMPORT_JOBS[job_id] = current
-        return dict(current)
+        snapshot = dict(current)
+    try:
+        _save_import_report(snapshot)
+    except Exception:
+        app.logger.exception("No se pudo persistir el estado de importacion %s", job_id)
+    return snapshot
 
 
 def get_import_job(job_id):

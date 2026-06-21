@@ -308,9 +308,15 @@ async function pollImportStatus() {
       headers: { "X-Requested-With": "XMLHttpRequest" },
       cache: "no-store"
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+      importStatusTimer = window.setTimeout(pollImportStatus, 1400);
+      return;
+    }
     const payload = await response.json();
-    if (!payload.ok || !payload.job) return;
+    if (!payload.ok || !payload.job) {
+      importStatusTimer = window.setTimeout(pollImportStatus, 1400);
+      return;
+    }
     importJustStarted = false;
     renderImportStatus(payload.job);
 
@@ -332,6 +338,7 @@ async function pollImportStatus() {
     }
   } catch (error) {
     console.error("No se pudo consultar el estado de importacion", error);
+    importStatusTimer = window.setTimeout(pollImportStatus, 1800);
   }
 }
 

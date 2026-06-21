@@ -66,6 +66,7 @@ app.config["SESSION_COOKIE_NAME"] = os.environ.get("FLASK_SESSION_COOKIE_NAME", 
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_SECURE_COOKIES") == "1"
+app.config["ADMIN_BULK_DELETE_PASSWORD"] = os.environ.get("ADMIN_BULK_DELETE_PASSWORD", "1122514048")
 
 IMPORT_JOBS = {}
 IMPORT_JOBS_LOCK = threading.Lock()
@@ -1474,6 +1475,10 @@ def grupos():
                     reasignados = despues.get("reasignados", 0)
                     rango_old = f"{_fmt_num(antes.get('rango_min'))}-{_fmt_num(antes.get('rango_max'))}"
                     texto = f"ELIMINAR_CAJA masivo: {reasignados} archivos reasignados desde la caja {caja_vis} ({rango_old})"
+                elif entidad == "caja" and accion == "ELIMINAR_ARCHIVOS_CAJA":
+                    total_archivos = despues.get("archivos_eliminados", antes.get("total_archivos", 0))
+                    total_pdfs = despues.get("pdfs_eliminados", 0)
+                    texto = f"ELIMINAR_ARCHIVOS_CAJA permanente: {total_archivos} documentos y {total_pdfs} PDF(s) eliminados de la caja {caja_vis}"
                 else:
                     texto = f"{accion}"
 
@@ -2125,6 +2130,10 @@ def archivos_legacy():
             reasignados = despues.get("reasignados", 0)
             rango_old = f"{_fmt_num(antes.get('rango_min'))}-{_fmt_num(antes.get('rango_max'))}"
             texto = f"ELIMINAR_CAJA masivo: {reasignados} archivos reasignados desde la caja {caja_vis} ({rango_old})"
+        elif entidad == "caja" and accion == "ELIMINAR_ARCHIVOS_CAJA":
+            total_archivos = despues.get("archivos_eliminados", antes.get("total_archivos", 0))
+            total_pdfs = despues.get("pdfs_eliminados", 0)
+            texto = f"ELIMINAR_ARCHIVOS_CAJA permanente: {total_archivos} documentos y {total_pdfs} PDF(s) eliminados de la caja {caja_vis}"
         else:
             texto = f"{accion}"
 
@@ -3031,6 +3040,85 @@ def archivo_caja(caja_id):
             flash("Caja eliminada correctamente.", "success")
             return redirect(url_for("archivo"))
 
+        # ---------- ELIMINAR TODOS LOS ARCHIVOS DE LA CAJA ----------
+        if accion == "eliminar_todos_archivos_caja":
+            if not admin_requerido():
+                flash_error(200, fallback="Solo el admin puede eliminar todos los archivos de una caja.")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+            admin_delete_password = request.form.get("admin_delete_password", "")
+            if admin_delete_password != app.config["ADMIN_BULK_DELETE_PASSWORD"]:
+                flash_error(200, fallback="Clave de seguridad invalida. No se eliminaron los documentos.")
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, numero, pdf_path
+                FROM archivos
+                WHERE caja_id = %s AND grupo_id = %s
+                """,
+                (caja_id, grupo_id)
+            )
+            archivos_caja = cur.fetchall()
+
+            total_archivos = len(archivos_caja)
+            pdfs = []
+            for _, _, pdf_path in archivos_caja:
+                if pdf_path:
+                    abs_path = pdf_path
+                    if not os.path.isabs(abs_path):
+                        abs_path = os.path.join(app.config["UPLOAD_FOLDER"], pdf_path)
+                    pdfs.append(abs_path)
+
+            cur.execute(
+                "DELETE FROM archivos WHERE caja_id = %s AND grupo_id = %s",
+                (caja_id, grupo_id)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            eliminados_pdf = 0
+            for path in pdfs:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                        eliminados_pdf += 1
+                except Exception:
+                    app.logger.exception("No se pudo eliminar PDF de borrado masivo")
+
+            registrar_movimiento(
+                session.get("usuario_id"),
+                grupo_id,
+                entidad="caja",
+                entidad_id=caja_id,
+                accion="ELIMINAR_ARCHIVOS_CAJA",
+                datos_antes={
+                    "total_archivos": total_archivos,
+                    "total_pdfs": len(pdfs),
+                },
+                datos_despues={
+                    "archivos_eliminados": total_archivos,
+                    "pdfs_eliminados": eliminados_pdf,
+                    "modo": "permanente",
+                },
+            )
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"ELIMINAR_ARCHIVOS_CAJA caja={caja_id} archivos={total_archivos} pdfs={eliminados_pdf}",
+                request.remote_addr,
+                grupo_id
+            )
+
+            if total_archivos == 0:
+                flash("La caja ya no tenia documentos.", "info")
+            else:
+                flash(f"Se eliminaron permanentemente {total_archivos} documento(s) de la caja.", "success")
+            return redirect(url_for("archivo_caja", caja_id=caja_id))
+
         # ---------- ELIMINAR ARCHIVO ----------
         if accion == "eliminar_archivo_fila":
             numero = int(request.form["numero"])
@@ -3652,6 +3740,12 @@ def deshacer_movimiento(mov_id):
     entidad, entidad_id = parse_item_movimiento(item)
     datos_antes = json_or_none(datos_antes)
     datos_despues = json_or_none(datos_despues)
+
+    if accion == "ELIMINAR_ARCHIVOS_CAJA":
+        cur.close()
+        conn.close()
+        flash_error(684, fallback="Este movimiento no se puede deshacer.")
+        return redirect(url_for("admin_movimientos"))
 
     try:
         if entidad == "archivo":

@@ -126,10 +126,14 @@
         <td class="col-info"><pre>{{ m[6] }}</pre></td>
         <td class="col-info"><pre>{{ m[7] }}</pre></td>
         <td>
+          {% if m[5] == "ELIMINAR_ARCHIVOS_CAJA" %}
+          <span>No reversible</span>
+          {% else %}
           <form method="post" action="{{ url_for('deshacer_movimiento', mov_id=m[0]) }}">
     <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
             <button type="submit">Deshacer</button>
           </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

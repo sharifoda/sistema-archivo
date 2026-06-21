@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}Login{% endblock %}
 
@@ -31,8 +31,26 @@
                 </div>
 
                 <div>
-                    <label>Contrasena</label>
-                    <input type="password" name="password" required>
+                    <label>Contraseña</label>
+                    <div class="password-field">
+                        <input id="login-password" type="password" name="password" required>
+                        <button
+                            type="button"
+                            class="password-toggle"
+                            id="login-password-toggle"
+                            aria-label="Mostrar contrasena"
+                            aria-pressed="false"
+                            aria-controls="login-password"
+                            title="Mostrar contrasena"
+                        >
+                            <span class="password-toggle-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                                    <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z"></path>
+                                    <circle cx="12" cy="12" r="3.2"></circle>
+                                </svg>
+                            </span>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="login-actions">
@@ -46,4 +64,23 @@
         </div>
     </section>
 </div>
+
+<script>
+(() => {
+    const passwordInput = document.getElementById("login-password");
+    const toggleButton = document.getElementById("login-password-toggle");
+
+    if (!passwordInput || !toggleButton) {
+        return;
+    }
+
+    toggleButton.addEventListener("click", () => {
+        const isHidden = passwordInput.type === "password";
+        passwordInput.type = isHidden ? "text" : "password";
+        toggleButton.setAttribute("aria-pressed", String(isHidden));
+        toggleButton.setAttribute("aria-label", isHidden ? "Ocultar contrasena" : "Mostrar contrasena");
+        toggleButton.setAttribute("title", isHidden ? "Ocultar contrasena" : "Mostrar contrasena");
+    });
+})();
+</script>
 {% endblock %}

@@ -328,13 +328,12 @@ async function pollImportStatus() {
       return;
     }
 
-    if (payload.job.status === "success" || payload.job.status === "partial") {
-      window.setTimeout(() => window.location.reload(), 900);
+    if (payload.job.status === "success" || payload.job.status === "partial" || payload.job.status === "failed") {
+      if (importStatusTimer) {
+        window.clearTimeout(importStatusTimer);
+        importStatusTimer = null;
+      }
       return;
-    }
-
-    if (payload.job.status === "failed") {
-      window.setTimeout(() => window.location.reload(), 900);
     }
   } catch (error) {
     console.error("No se pudo consultar el estado de importacion", error);

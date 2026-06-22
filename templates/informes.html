@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  body.dashboard-modal-open{ overflow:hidden; }
+  .reports-shell{
+    display:grid;
+    gap:22px;
+  }
+  .reports-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .reports-header h2{
+    margin:0;
+    color:#163760;
+  }
+  .reports-header p{
+    margin:6px 0 0;
+    color:#5a6a7f;
+  }
+  .reports-filter{
+    display:flex;
+    gap:10px;
+    align-items:end;
+    flex-wrap:wrap;
+  }
+  .reports-filter label{
+    display:grid;
+    gap:6px;
+    font-size:13px;
+    color:#3f5574;
+  }
+  .reports-filter select{
+    min-width:260px;
+    padding:10px 12px;
+    border:1px solid #c9d8e8;
+    border-radius:10px;
+    background:#fff;
+  }
+  .btn{
+    padding:10px 14px;
+    border:2px solid #000;
+    background:#fff;
+    cursor:pointer;
+    border-radius:8px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .reports-list{
+    display:grid;
+    gap:14px;
+  }
+  .report-card{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:16px;
+    padding:18px 20px;
+    border:1px solid #dbe6f0;
+    border-radius:18px;
+    background:rgba(255,255,255,0.96);
+  }
+  .report-card-main{
+    display:grid;
+    gap:8px;
+  }
+  .report-card-main strong{
+    font-size:20px;
+    color:#163760;
+  }
+  .report-meta{
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    color:#5a6a7f;
+    font-size:14px;
+  }
+  .report-actions{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+  .report-status-pill{
+    padding:8px 12px;
+    border-radius:999px;
+    border:1px solid #cbd8e6;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.06em;
+  }
+  .report-status-pill.success{ background:#ebfff6; color:#156245; border-color:#b7e8cf; }
+  .report-status-pill.partial{ background:#fff8e7; color:#6f4a00; border-color:#f0cf85; }
+  .report-status-pill.failed{ background:#fff0f0; color:#9d1c1c; border-color:#efb1b1; }
+  .reports-empty{
+    padding:28px;
+    border:1px dashed #c8d8e8;
+    border-radius:18px;
+    color:#5a6a7f;
+    background:rgba(255,255,255,0.8);
+  }
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9998;
+  }
+  .modal{
+    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(760px,94vw); max-height:85vh; overflow:auto; background:#fff; border-radius:14px;
+    padding:20px; box-shadow:0 16px 36px rgba(0,0,0,.22); z-index:9999;
+  }
+  .modal.visible, .modal-overlay.visible{ display:block; }
+  .report-grid{
+    display:grid;
+    grid-template-columns:repeat(2, minmax(220px, 1fr));
+    gap:12px;
+    margin-top:14px;
+  }
+  .report-stat{
+    border:1px solid #dbe6f0;
+    border-radius:14px;
+    padding:14px;
+    background:#fbfdff;
+  }
+  .report-stat strong{
+    display:block;
+    margin-bottom:6px;
+    color:#163760;
+    font-size:12px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+  }
+  .report-detail{
+    margin-top:14px;
+    border:1px solid #dbe6f0;
+    border-radius:14px;
+    padding:14px;
+    background:#fbfdff;
+  }
+  .report-invalid-list{
+    margin:8px 0 0;
+    padding-left:18px;
+  }
+</style>
+
+<section class="reports-shell">
+  <div class="reports-header">
+    <div>
+      <h2>Informes de carga</h2>
+      <p>
+        {% if session.get("rol") == "admin" %}
+          Viendo informes de {{ selected_group_name or "todas las empresas" }}.
+        {% else %}
+          Informes disponibles de la empresa {{ selected_group_name or grupo_actual }}.
+        {% endif %}
+      </p>
+    </div>
+
+    {% if session.get("rol") == "admin" and group_options %}
+    <form method="get" class="reports-filter">
+      <label>
+        Empresa
+        <select name="empresa">
+          {% for group in group_options %}
+          <option value="{{ group[0] }}" {% if group[0] == selected_group_id %}selected{% endif %}>{{ group[1] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn">Ver informes</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if reports %}
+  <div class="reports-list">
+    {% for report in reports %}
+    <article class="report-card">
+      <div class="report-card-main">
+        <strong>{{ report.source_filename or ("Importacion " ~ report.job_id[:8]) }}</strong>
+        <div class="report-meta">
+          <span>Usuario: {{ report.user_name or "N/D" }}</span>
+          <span>Filas: {{ report.total_rows }}</span>
+          <span>Procesados: {{ report.processed_rows }}</span>
+          <span>Exitosos: {{ report.inserted }}</span>
+          <span>Ignorados: {{ report.ignored }}</span>
+          <span>Inválidos: {{ report.invalid }}</span>
+          <span>Fin: {{ report.finished_at or report.started_at or "N/D" }}</span>
+        </div>
+      </div>
+      <div class="report-actions">
+        <span class="report-status-pill {{ report.status }}">{{ report.status|upper }}</span>
+        <button type="button" class="btn" onclick="verInformeImportacion('{{ report.job_id }}')">Ver informe</button>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="reports-empty">
+    No hay informes registrados para esta empresa.
+  </div>
+  {% endif %}
+</section>
+
+<div id="importReportOverlay" class="modal-overlay"></div>
+<div id="importReportModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
+  <h3 id="reportModalTitle">Informe de importación Excel</h3>
+  <div id="importReportContent"></div>
+  <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+    <button type="button" class="btn" onclick="cerrarInformeImportacion()">Cerrar</button>
+  </div>
+</div>
+
+<div id="server-data" data-report-url-base="{{ import_report_url_base }}"></div>
+<script>
+  const reportUrlBase = document.getElementById("server-data")?.dataset.reportUrlBase || "";
+
+  function buildImportReportUrl(jobId) {
+    return reportUrlBase ? reportUrlBase.replace("__JOB__", String(jobId || "")) : "";
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "N/D";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("es-CO");
+  }
+
+  function renderImportReport(report) {
+    const overlay = document.getElementById("importReportOverlay");
+    const modal = document.getElementById("importReportModal");
+    const content = document.getElementById("importReportContent");
+    if (!overlay || !modal || !content) return;
+
+    const invalidList = Array.isArray(report.invalid_details) && report.invalid_details.length
+      ? `<div class="report-detail"><strong>Inválidos detectados</strong><ul class="report-invalid-list">${report.invalid_details.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+      : `<div class="report-detail"><strong>Inválidos detectados</strong><div>No hubo registros inválidos.</div></div>`;
+
+    content.innerHTML = `
+      <div class="report-grid">
+        <div class="report-stat"><strong>Archivo</strong><span>${escapeHtml(report.source_filename || "N/D")}</span></div>
+        <div class="report-stat"><strong>Estado</strong><span>${escapeHtml(String(report.status || "").toUpperCase())}</span></div>
+        <div class="report-stat"><strong>Usuario</strong><span>${escapeHtml(report.user_name || "N/D")}</span></div>
+        <div class="report-stat"><strong>Empresa</strong><span>${escapeHtml(report.group_name || "N/D")}</span></div>
+        <div class="report-stat"><strong>Total filas</strong><span>${escapeHtml(report.total_rows || 0)}</span></div>
+        <div class="report-stat"><strong>Procesados</strong><span>${escapeHtml(report.processed_rows || 0)}</span></div>
+        <div class="report-stat"><strong>Exitosos</strong><span>${escapeHtml(report.inserted || 0)}</span></div>
+        <div class="report-stat"><strong>Repetidos</strong><span>${escapeHtml(report.ignored || 0)}</span></div>
+        <div class="report-stat"><strong>Inválidos</strong><span>${escapeHtml(report.invalid || 0)}</span></div>
+        <div class="report-stat"><strong>Error</strong><span>${report.error_code ? "ERROR " + escapeHtml(report.error_code) : "Sin error"}</span></div>
+        <div class="report-stat"><strong>Inicio</strong><span>${escapeHtml(formatDateTime(report.started_at))}</span></div>
+        <div class="report-stat"><strong>Fin</strong><span>${escapeHtml(formatDateTime(report.finished_at))}</span></div>
+      </div>
+      <div class="report-detail"><strong>Resumen</strong><div style="margin-top:8px;">${escapeHtml(report.detail || "Sin observaciones.")}</div></div>
+      ${invalidList}
+    `;
+
+    overlay.classList.add("visible");
+    modal.classList.add("visible");
+    document.body.classList.add("dashboard-modal-open");
+  }
+
+  async function verInformeImportacion(jobId) {
+    const url = buildImportReportUrl(jobId);
+    if (!url) return;
+    const response = await fetch(url, {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      alert("No se pudo cargar el informe.");
+      return;
+    }
+    const payload = await response.json();
+    if (!payload.ok || !payload.report) {
+      alert("No se pudo cargar el informe.");
+      return;
+    }
+    renderImportReport(payload.report);
+  }
+
+  function cerrarInformeImportacion() {
+    document.getElementById("importReportOverlay")?.classList.remove("visible");
+    document.getElementById("importReportModal")?.classList.remove("visible");
+    document.body.classList.remove("dashboard-modal-open");
+  }
+
+  document.addEventListener("click", function (e) {
+    if (e.target === document.getElementById("importReportOverlay")) {
+      cerrarInformeImportacion();
+    }
+  });
+</script>
+{% endblock %}

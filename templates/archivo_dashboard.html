@@ -500,33 +500,6 @@
   <div class="import-status-note" id="importStatusNote"></div>
 </div>
 
-{% if session.get("rol") in ["admin", "supervisor"] and recent_import_reports %}
-<section class="import-reports">
-  <h3>Informes recientes de Excel</h3>
-  <div class="import-reports-list">
-    {% for report in recent_import_reports %}
-    <div class="import-report-card">
-      <div>
-        <strong>{{ report.source_filename or ("Importacion " ~ report.job_id[:8]) }}</strong>
-        <div class="import-report-meta">
-          <span>{{ report.user_name or "Sin usuario" }}</span>
-          <span>{{ report.group_name or "Sin empresa" }}</span>
-          <span>Filas: {{ report.total_rows }}</span>
-          <span>Exitosos: {{ report.inserted }}</span>
-          <span>Ignorados: {{ report.ignored }}</span>
-          <span>Invalidos: {{ report.invalid }}</span>
-        </div>
-      </div>
-      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
-        <span class="report-status-pill {{ report.status }}">{{ report.status|upper }}</span>
-        <button class="btn btn-small" type="button" onclick="verInformeImportacion('{{ report.job_id }}')">Ver informe</button>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
 <div id="importProgressOverlay" class="import-progress-overlay"></div>
 <div id="importProgressModal" class="import-progress-modal" role="dialog" aria-modal="true" aria-labelledby="importProgressHeading">
   <div class="import-progress-head">

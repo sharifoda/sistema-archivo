@@ -258,20 +258,33 @@ def get_import_report(job_id):
     }
 
 
-def get_recent_import_reports(limit=10):
+def get_recent_import_reports(limit=10, group_id=None):
     ensure_import_reports_table()
     conn = get_db()
     cur = conn.cursor()
     limit = max(1, int(limit))
-    cur.execute(
-        f"""
-        SELECT TOP {limit}
-            job_id, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
-            total_rows, processed_rows, inserted, ignored, invalid, started_at, finished_at
-        FROM importaciones_excel
-        ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC
-        """
-    )
+    if group_id:
+        cur.execute(
+            f"""
+            SELECT TOP {limit}
+                job_id, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
+                total_rows, processed_rows, inserted, ignored, invalid, started_at, finished_at
+            FROM importaciones_excel
+            WHERE empresa = %s
+            ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC
+            """,
+            (group_id,)
+        )
+    else:
+        cur.execute(
+            f"""
+            SELECT TOP {limit}
+                job_id, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
+                total_rows, processed_rows, inserted, ignored, invalid, started_at, finished_at
+            FROM importaciones_excel
+            ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC
+            """
+        )
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -305,6 +318,15 @@ def get_group_name(group_id):
     cur.close()
     conn.close()
     return row[0] if row else ""
+
+
+def puede_ver_reporte_importacion(job):
+    if not job:
+        return False
+    if admin_requerido():
+        return True
+    grupo_actual = obtener_grupo_id()
+    return bool(grupo_actual and job.get("group_id") == grupo_actual)
 
 
 def build_import_job_payload(job_id, **extra):
@@ -393,15 +415,14 @@ def importacion_estado(job_id):
     if not login_requerido():
         return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
 
-    current_job_id = session.get("last_import_job_id")
-    if current_job_id != job_id and not supervisor_requerido():
-        return jsonify({"ok": False, "error": error_text(206)}), 403
-
     job = get_import_job(job_id)
     if not job:
         job = get_import_report(job_id)
     if not job:
         return jsonify({"ok": False, "error": error_text(750)}), 404
+
+    if not puede_ver_reporte_importacion(job):
+        return jsonify({"ok": False, "error": error_text(206)}), 403
 
     return jsonify({"ok": True, "job": job})
 
@@ -411,15 +432,45 @@ def importacion_reporte(job_id):
     if not login_requerido():
         return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
 
-    current_job_id = session.get("last_import_job_id")
-    if current_job_id != job_id and not supervisor_requerido():
-        return jsonify({"ok": False, "error": error_text(206)}), 403
-
     job = get_import_job(job_id) or get_import_report(job_id)
     if not job:
         return jsonify({"ok": False, "error": error_text(750)}), 404
 
+    if not puede_ver_reporte_importacion(job):
+        return jsonify({"ok": False, "error": error_text(206)}), 403
+
     return jsonify({"ok": True, "report": job})
+
+
+@app.route("/informes")
+def informes():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    selected_group_id = grupo_id
+    group_options = []
+
+    if admin_requerido():
+        requested_group = request.args.get("empresa", "").strip()
+        if requested_group and requested_group.isdigit():
+            selected_group_id = int(requested_group)
+        group_options = obtener_todos_grupos()
+
+    reports = get_recent_import_reports(100, group_id=selected_group_id)
+    selected_group_name = get_group_name(selected_group_id)
+
+    return render_template(
+        "informes.html",
+        reports=reports,
+        selected_group_id=selected_group_id,
+        selected_group_name=selected_group_name,
+        group_options=group_options,
+        import_report_url_base=url_for("importacion_reporte", job_id="__JOB__"),
+    )
 
 def normalizar_nombre(nombre):
     return nombre.upper() if nombre else nombre
@@ -2184,7 +2235,9 @@ def archivo():
     view_mode = request.args.get("view", "").strip()
     import_job_id = request.args.get("import_job", "").strip() or session.get("last_import_job_id")
     import_job = (get_import_job(import_job_id) or get_import_report(import_job_id)) if import_job_id else None
-    recent_import_reports = get_recent_import_reports(8) if supervisor_requerido() else []
+    if import_job and not puede_ver_reporte_importacion(import_job):
+        import_job = None
+        import_job_id = None
 
     if request.method == "GET" and archivador_mode and view_mode == "especial":
         conn = get_db()
@@ -2943,7 +2996,6 @@ def archivo():
         archivador_mode=archivador_mode,
         pdf_bulk_data=pdf_bulk_data,
         import_job=import_job,
-        recent_import_reports=recent_import_reports,
         import_status_url=url_for("importacion_estado", job_id=import_job_id) if import_job_id else None,
         import_report_url_base=url_for("importacion_reporte", job_id="__JOB__"),
     )

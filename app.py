@@ -59,7 +59,9 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "pdfs")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
+app.config["MAX_CONTENT_LENGTH"] = 260 * 1024 * 1024  # 260MB total request size
+app.config["MASSIVE_PDF_MAX_FILES"] = 500
+app.config["MASSIVE_PDF_MAX_TOTAL_BYTES"] = 250 * 1024 * 1024
 
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "clave_super_secreta")
 app.config["SESSION_COOKIE_NAME"] = os.environ.get("FLASK_SESSION_COOKIE_NAME", "session")
@@ -600,6 +602,26 @@ def es_pdf(file):
         return False
     filename = (file.filename or "").lower()
     return filename.endswith(".pdf")
+
+
+def obtener_tamano_upload(file):
+    if not file or not getattr(file, "stream", None):
+        return 0
+    try:
+        actual = file.stream.tell()
+    except Exception:
+        actual = 0
+    try:
+        file.stream.seek(0, os.SEEK_END)
+        total = file.stream.tell()
+        file.stream.seek(actual)
+        return max(0, int(total))
+    except Exception:
+        try:
+            file.stream.seek(0)
+        except Exception:
+            pass
+        return 0
 
 def guardar_pdf(file, numero_documento, grupo_id):
     """
@@ -2375,6 +2397,26 @@ def archivo():
             pdf_files = [f for f in pdf_files if f and f.filename]
             if not pdf_files:
                 flash_error(422, fallback="Debes seleccionar al menos un PDF.")
+                return redirect(url_for("archivo"))
+
+            max_files = app.config["MASSIVE_PDF_MAX_FILES"]
+            max_total_bytes = app.config["MASSIVE_PDF_MAX_TOTAL_BYTES"]
+            total_bytes = sum(obtener_tamano_upload(file) for file in pdf_files)
+
+            if len(pdf_files) > max_files:
+                flash_error(
+                    422,
+                    fallback=f"Solo puedes subir hasta {max_files} PDFs por carga masiva."
+                )
+                return redirect(url_for("archivo"))
+
+            if total_bytes > max_total_bytes:
+                limite_mb = max_total_bytes / (1024 * 1024)
+                total_mb = total_bytes / (1024 * 1024)
+                flash_error(
+                    422,
+                    fallback=f"La carga masiva supera el limite de {limite_mb:.0f} MB. Tamaño actual: {total_mb:.1f} MB."
+                )
                 return redirect(url_for("archivo"))
 
             conn = get_db()
@@ -4428,6 +4470,15 @@ def handle_method_not_allowed(e):
         flash_error(751)
         return redirect(request.referrer or url_for("inicio"))
     return error_text(751), 405
+
+
+@app.errorhandler(413)
+def handle_request_too_large(e):
+    mensaje = "La carga supera el limite permitido del servidor. Para PDF masivo, el maximo es 500 archivos y 250 MB por lote."
+    if login_requerido():
+        flash(mensaje, "error")
+        return redirect(request.referrer or url_for("archivo"))
+    return mensaje, 413
 
 
 @app.errorhandler(Exception)

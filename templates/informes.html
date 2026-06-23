@@ -187,7 +187,7 @@
           <span>Exitosos: {{ report.inserted }}</span>
           <span>Ignorados: {{ report.ignored }}</span>
           <span>Inválidos: {{ report.invalid }}</span>
-          <span>Fin: {{ report.finished_at or report.started_at or "N/D" }}</span>
+          <span>Fin: {{ (report.finished_at or report.started_at)|hora_col if (report.finished_at or report.started_at) else "N/D" }}</span>
         </div>
       </div>
       <div class="report-actions">
@@ -234,7 +234,7 @@
     if (!value) return "N/D";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
-    return date.toLocaleString("es-CO");
+    return date.toLocaleString("es-CO", { timeZone: "America/Bogota" });
   }
 
   function renderImportReport(report) {

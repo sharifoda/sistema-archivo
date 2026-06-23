@@ -35,6 +35,7 @@ from werkzeug.security import generate_password_hash
 from db import get_db
 from io import BytesIO
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 from collections import defaultdict
 from difflib import SequenceMatcher
@@ -69,6 +70,7 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_SECURE_COOKIES") == "1"
 app.config["ADMIN_BULK_DELETE_PASSWORD"] = os.environ.get("ADMIN_BULK_DELETE_PASSWORD", "1122514048")
+APP_TIMEZONE = ZoneInfo("America/Bogota")
 
 IMPORT_JOBS = {}
 IMPORT_JOBS_LOCK = threading.Lock()
@@ -596,6 +598,26 @@ def formato_puntos(valor):
     except (TypeError, ValueError):
         return valor
     return f"{numero:,}".replace(",", ".")
+
+
+@app.template_filter("hora_col")
+def formato_hora_colombia(valor):
+    if not valor:
+        return "N/D"
+    dt = valor
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if not texto:
+            return "N/D"
+        try:
+            dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+        except Exception:
+            return valor
+    if not isinstance(dt, datetime):
+        return valor
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(APP_TIMEZONE).strftime("%d/%m/%Y, %I:%M:%S %p")
 
 def es_pdf(file):
     if not file:

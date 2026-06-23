@@ -103,7 +103,7 @@ function formatDateTime(value) {
   if (!value) return "N/D";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("es-CO");
+  return date.toLocaleString("es-CO", { timeZone: "America/Bogota" });
 }
 
 function buildImportReportUrl(jobId) {

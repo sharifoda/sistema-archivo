@@ -280,7 +280,7 @@
       <td>
         {% if g[4] and g[4]|length > 0 %}
           {% for m in g[4] %}
-            <div class="user-item">{{ m[4] or "-" }}</div>
+            <div class="user-item">{{ m[4]|hora_col if m[4] else "-" }}</div>
           {% endfor %}
         {% else %}
           -

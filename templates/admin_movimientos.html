@@ -17,7 +17,7 @@
   </tr>
   {% for m in movimientos %}
   <tr>
-    <td>{{ m[1] }}</td>
+    <td>{{ m[1]|hora_col }}</td>
     <td>{{ m[2] }}</td>
     <td>{{ m[3] or "Sin grupo" }}</td>
     <td>{{ m[4] }}</td>

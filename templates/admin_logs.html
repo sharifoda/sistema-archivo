@@ -83,7 +83,7 @@
       <tr>
         <td>{{ r[0] }}</td>
         <td class="col-info">{{ r[1] }}</td>
-        <td>{{ r[2] }}</td>
+        <td>{{ r[2]|hora_col }}</td>
         <td>{{ r[3] }}</td>
         <td>{{ r[4] or "Sin empresa" }}</td>
         <td>
@@ -118,7 +118,7 @@
       </tr>
       {% for m in items %}
       <tr>
-        <td>{{ m[1] }}</td>
+        <td>{{ m[1]|hora_col }}</td>
         <td>{{ m[2] }}</td>
         <td>{{ m[3] or "Sin empresa" }}</td>
         <td>{{ m[4] }}</td>
@@ -157,7 +157,7 @@
       <td>{{ u[1] }}</td>
       <td>{{ u[2] }}</td>
       <td>{{ u[4] }}</td>
-      <td>{{ u[3] }}</td>
+      <td>{{ u[3]|hora_col }}</td>
       <td>
         <div class="user-actions">
           <button type="button" class="btn" onclick="abrirUsuario('{{ u[0] }}')">Modificar</button>

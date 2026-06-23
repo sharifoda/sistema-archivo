@@ -545,6 +545,9 @@
 <div class="topbar">
   <div class="left">
     <button class="btn" type="button" onclick="abrirModal('Caja')">Agregar Caja</button>
+    {% if session.get("rol") == "admin" %}
+      <button class="btn" type="button" onclick="abrirModal('CajaMasiva')" style="margin-left:10px;">Crear Cajas Masivas</button>
+    {% endif %}
   </div>
 
   <div class="center">
@@ -662,6 +665,35 @@
     <div class="actions">
       <button type="button" class="btn" onclick="cerrarModal('Caja')">Cancelar</button>
       <button type="submit" class="btn">Crear</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== MODAL CREAR CAJAS MASIVAS ===== -->
+<div class="modal-overlay" id="overlayCajaMasiva"></div>
+<div class="modal" id="modalCajaMasiva">
+  <h3>📦 Crear cajas masivas</h3>
+  <p style="margin:6px 0 14px; color:#5a6a7f;">
+    Define cuántas cajas quieres crear, desde qué número iniciar y el salto entre rangos.
+    Ejemplo: inicio 0, salto 100, cantidad 3 crea 0-100, 101-200 y 201-300.
+  </p>
+
+  <form method="post">
+    <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+    <input type="hidden" name="accion" value="crear_cajas_masivas">
+
+    <label>Cantidad de cajas</label><br>
+    <input type="number" name="cantidad_cajas" min="1" max="500" value="10" required><br><br>
+
+    <label>Inicio del primer rango</label><br>
+    <input type="number" name="inicio_cajas" min="0" value="0" required><br><br>
+
+    <label>Salto entre rangos</label><br>
+    <input type="number" name="salto_cajas" min="1" value="100" required><br><br>
+
+    <div class="actions">
+      <button type="button" class="btn" onclick="cerrarModal('CajaMasiva')">Cancelar</button>
+      <button type="submit" class="btn">Crear lote</button>
     </div>
   </form>
 </div>

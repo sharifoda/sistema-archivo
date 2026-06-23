@@ -56,7 +56,7 @@ function cerrarModal(tipo, limpiarBuscar = false) {
   hide("overlay" + tipo);
   hide("modal" + tipo);
 
-  const modalAbierto = ["Caja", "Doc", "Buscar", "Editar", "PdfDownload"].some((name) => {
+  const modalAbierto = ["Caja", "CajaMasiva", "Doc", "Buscar", "Editar", "PdfDownload"].some((name) => {
     const modal = document.getElementById("modal" + name);
     return modal && modal.style.display === "block";
   });
@@ -416,6 +416,8 @@ if (editarAppendInput && editarRemoveInput) {
 [
   "overlayCaja",
   "modalCaja",
+  "overlayCajaMasiva",
+  "modalCajaMasiva",
   "overlayDoc",
   "modalDoc",
   "overlayBuscar",
@@ -441,7 +443,7 @@ if (editarAppendInput && editarRemoveInput) {
 
 // Cerrar modal al hacer click en overlay
 document.addEventListener("click", function (e) {
-  ["Caja", "Doc", "Buscar", "Editar", "PdfDownload"].forEach(tipo => {
+  ["Caja", "CajaMasiva", "Doc", "Buscar", "Editar", "PdfDownload"].forEach(tipo => {
     const ov = document.getElementById("overlay" + tipo);
     if (e.target === ov) {
       cerrarModal(tipo, tipo === "Buscar");
@@ -458,6 +460,7 @@ document.addEventListener("keydown", function (e) {
   if (e.key !== "Escape") return;
 
   cerrarModal("Caja");
+  cerrarModal("CajaMasiva");
   cerrarModal("Doc");
   cerrarModal("Buscar", true);
   cerrarModal("Editar");

@@ -2534,6 +2534,61 @@ def archivo():
             flash("Caja creada correctamente.", "success")
             return redirect(url_for("archivo"))
 
+        # ---------- Crear Cajas Masivas ----------
+        if accion == "crear_cajas_masivas":
+            if not admin_requerido():
+                flash_error(204)
+                return redirect(url_for("archivo"))
+
+            try:
+                cantidad = int(request.form.get("cantidad_cajas", "0"))
+                salto = int(request.form.get("salto_cajas", "0"))
+                inicio = int(request.form.get("inicio_cajas", "0"))
+            except (TypeError, ValueError):
+                flash_error(400)
+                return redirect(url_for("archivo"))
+
+            if cantidad <= 0 or salto <= 0 or inicio < 0:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+
+            if cantidad > 500:
+                flash_error(400, detail="La cantidad maxima por lote es 500 cajas.")
+                return redirect(url_for("archivo"))
+
+            creadas = []
+            movidos_total = 0
+            rango_inicio = inicio
+            rango_fin = inicio + salto
+
+            for _ in range(cantidad):
+                caja_id = crear_caja(rango_inicio, rango_fin, grupo_id, creado_por=session.get("usuario_id"))
+                movidos = reubicar_archivos_pendientes_por_nueva_caja(
+                    caja_id,
+                    grupo_id,
+                    session.get("usuario_id")
+                )
+                creadas.append((caja_id, rango_inicio, rango_fin))
+                movidos_total += movidos
+                rango_inicio = rango_fin + 1
+                rango_fin = rango_fin + salto
+
+            primer_rango = f"{creadas[0][1]}-{creadas[0][2]}"
+            ultimo_rango = f"{creadas[-1][1]}-{creadas[-1][2]}"
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"CREAR_CAJAS_MASIVAS cantidad={cantidad} salto={salto} inicio={inicio} movidos_desde_caja0={movidos_total} primer_rango={primer_rango} ultimo_rango={ultimo_rango}",
+                request.remote_addr,
+                grupo_id
+            )
+
+            flash(
+                f"Se crearon {cantidad} cajas correctamente. Rango inicial {primer_rango}, rango final {ultimo_rango}.",
+                "success"
+            )
+            return redirect(url_for("archivo"))
+
         # ---------- Agregar Documento ----------
         elif accion == "agregar_documento":
             numero = int(request.form["numero"])

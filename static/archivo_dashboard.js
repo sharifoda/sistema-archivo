@@ -8,6 +8,7 @@ const URL_CAJA_BASE = data.urlCajaBase;
 const URL_PDF_BASE  = data.urlPdfBase;
 const IMPORT_STATUS_URL = data.importStatusUrl || "";
 const IMPORT_REPORT_URL_BASE = data.importReportUrlBase || "";
+const IMPORT_CLOSE_URL = data.importCloseUrl || "";
 const IMPORT_JOB = data.importJob || null;
 const resultado     = data.resultado;
 const csrfToken     = data.csrfToken || "";
@@ -153,6 +154,13 @@ function syncImportJobUrl(jobId, done = false) {
   window.history.replaceState({}, "", url.toString());
 }
 
+function clearImportJobUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("import_job");
+  url.searchParams.delete("import_done");
+  window.history.replaceState({}, "", url.toString());
+}
+
 function renderImportStatus(job) {
   importCurrentJob = job || null;
   if (job?.import_type) {
@@ -271,7 +279,38 @@ function renderImportProgressModal(job) {
   document.body.classList.add("dashboard-modal-open");
 }
 
-function cerrarImportProgressModal() {
+async function cerrarImportProgressModal() {
+  if (importStatusTimer) {
+    window.clearTimeout(importStatusTimer);
+    importStatusTimer = null;
+  }
+
+  if (IMPORT_CLOSE_URL) {
+    try {
+      const body = new URLSearchParams();
+      body.set("_csrf_token", csrfToken);
+      if (importCurrentJob?.job_id) {
+        body.set("job_id", importCurrentJob.job_id);
+      }
+      await fetch(IMPORT_CLOSE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: body.toString(),
+        cache: "no-store"
+      });
+    } catch (error) {
+      console.error("No se pudo cerrar el informe activo", error);
+    }
+  }
+
+  importCurrentJob = null;
+  importJustStarted = false;
+  renderImportStatus(null);
+  clearImportJobUrl();
+
   const overlay = document.getElementById("importProgressOverlay");
   const modal = document.getElementById("importProgressModal");
   if (overlay) overlay.classList.remove("visible");
@@ -303,9 +342,11 @@ async function verInformeImportacion(jobId) {
   }
 }
 
-function verInformeImportacionActual() {
+async function verInformeImportacionActual() {
   if (!importCurrentJob || !importCurrentJob.job_id) return;
-  verInformeImportacion(importCurrentJob.job_id);
+  const jobId = importCurrentJob.job_id;
+  await cerrarImportProgressModal();
+  verInformeImportacion(jobId);
 }
 
 function renderImportReport(report) {

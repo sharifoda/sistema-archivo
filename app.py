@@ -494,6 +494,20 @@ def importacion_reporte(job_id):
     return jsonify({"ok": True, "report": job})
 
 
+@app.route("/importacion/cerrar", methods=["POST"])
+def importacion_cerrar():
+    if not login_requerido():
+        return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
+
+    job_id = (request.form.get("job_id") or "").strip()
+    current_job = session.get("last_import_job_id")
+
+    if not job_id or current_job == job_id:
+        session.pop("last_import_job_id", None)
+
+    return jsonify({"ok": True})
+
+
 @app.route("/informes")
 def informes():
     if not login_requerido():

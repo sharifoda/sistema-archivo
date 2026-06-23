@@ -747,12 +747,29 @@ def obtener_numero_desde_nombre_pdf(filename):
     if ext.lower() != ".pdf":
         return None
     nombre = nombre.strip()
+    prefixed = re.fullmatch(r"\d{4}_(\d+)", nombre)
+    if prefixed:
+        nombre = prefixed.group(1)
     if not re.fullmatch(r"\d+", nombre):
         return None
     try:
         return int(nombre)
     except Exception:
         return None
+
+
+def obtener_nombre_original_pdf(filename):
+    if not filename:
+        return ""
+    base = os.path.basename(filename)
+    nombre, ext = os.path.splitext(base)
+    if ext.lower() != ".pdf":
+        return base
+    nombre = nombre.strip()
+    prefixed = re.fullmatch(r"\d{4}_(.+)", nombre)
+    if prefixed:
+        return f"{prefixed.group(1)}{ext.lower()}"
+    return base
 
 
 def login_requerido():
@@ -1173,11 +1190,12 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
     try:
         for index, filename in enumerate(file_names, start=1):
             abs_path = os.path.join(job_dir, filename)
+            display_name = obtener_nombre_original_pdf(filename)
             procesados = index
 
             if not filename.lower().endswith(".pdf"):
                 invalidos += 1
-                add_invalid_detail(invalid_details, filename, reason="extension invalida")
+                add_invalid_detail(invalid_details, display_name or filename, reason="extension invalida")
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
@@ -1193,7 +1211,7 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             numero = obtener_numero_desde_nombre_pdf(filename)
             if numero is None:
                 invalidos += 1
-                add_invalid_detail(invalid_details, filename, reason="nombre de archivo invalido")
+                add_invalid_detail(invalid_details, display_name or filename, reason="nombre de archivo invalido")
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
@@ -1213,7 +1231,7 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             row = cur.fetchone()
             if not row:
                 no_encontrados += 1
-                add_invalid_detail(invalid_details, filename, reason="documento no encontrado")
+                add_invalid_detail(invalid_details, display_name or filename, reason="documento no encontrado")
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
@@ -1233,7 +1251,7 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                     pdf_bytes = fh.read()
             except Exception:
                 invalidos += 1
-                add_invalid_detail(invalid_details, filename, reason="no se pudo leer el archivo")
+                add_invalid_detail(invalid_details, display_name or filename, reason="no se pudo leer el archivo")
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
@@ -1257,13 +1275,13 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                         output.write(self.stream.read())
                     self.stream.seek(0)
 
-            file_obj = StoredUpload(filename, pdf_bytes)
+            file_obj = StoredUpload(display_name or filename, pdf_bytes)
 
             if pdf_old:
                 pdf_name = unir_pdf_existente(pdf_old, file_obj, numero, grupo_id)
                 if not pdf_name:
                     invalidos += 1
-                    add_invalid_detail(invalid_details, filename, reason="no se pudo unir el PDF")
+                    add_invalid_detail(invalid_details, display_name or filename, reason="no se pudo unir el PDF")
                     set_import_job(
                         job_id,
                         processed_rows=procesados,

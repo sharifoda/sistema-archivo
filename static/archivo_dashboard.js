@@ -413,7 +413,22 @@ if (editarAppendInput && editarRemoveInput) {
   });
 }
 
-["overlayPdfDownload", "modalPdfDownload", "importReportOverlay", "importReportModal", "importProgressOverlay", "importProgressModal"].forEach((id) => {
+[
+  "overlayCaja",
+  "modalCaja",
+  "overlayDoc",
+  "modalDoc",
+  "overlayBuscar",
+  "modalBuscar",
+  "overlayEditar",
+  "modalEditar",
+  "overlayPdfDownload",
+  "modalPdfDownload",
+  "importReportOverlay",
+  "importReportModal",
+  "importProgressOverlay",
+  "importProgressModal"
+].forEach((id) => {
   const el = document.getElementById(id);
   if (el && el.parentElement !== document.body) {
     document.body.appendChild(el);

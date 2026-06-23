@@ -16,6 +16,7 @@ let importStatusTimer = null;
 let importLastInserted = IMPORT_JOB && Number.isFinite(Number(IMPORT_JOB.inserted)) ? Number(IMPORT_JOB.inserted) : 0;
 let importCurrentJob = IMPORT_JOB || null;
 let importJustStarted = false;
+let importTypePending = IMPORT_JOB?.import_type || "excel";
 
 /* =========================
    Estado global de búsqueda
@@ -110,8 +111,53 @@ function buildImportReportUrl(jobId) {
   return IMPORT_REPORT_URL_BASE ? IMPORT_REPORT_URL_BASE.replace("__JOB__", String(jobId || "")) : "";
 }
 
+function getImportLabels(job) {
+  const importType = String(job?.import_type || importTypePending || "excel").toLowerCase();
+  if (importType === "pdf") {
+    return {
+      importType,
+      headingProgress: "Carga de PDF en progreso",
+      headingDone: "Carga de PDF finalizada",
+      defaultMessage: "Carga de PDF en proceso.",
+      pendingDetail: "Subiendo archivos y preparando la carga masiva de PDF...",
+      processed: "Procesados",
+      inserted: "Nuevos",
+      merged: "Unidos",
+      ignored: "No encontrados",
+      invalid: "Invalidos"
+    };
+  }
+  return {
+    importType,
+    headingProgress: "Carga de Excel en progreso",
+    headingDone: "Carga de Excel finalizada",
+    defaultMessage: "Importacion en proceso.",
+    pendingDetail: "Subiendo archivo y preparando el analisis del Excel...",
+    processed: "Procesados",
+    inserted: "Exitosos",
+    merged: "Unidos",
+    ignored: "Repetidos",
+    invalid: "Invalidos"
+  };
+}
+
+function syncImportJobUrl(jobId, done = false) {
+  if (!jobId) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("import_job", String(jobId));
+  if (done) {
+    url.searchParams.set("import_done", "1");
+  } else {
+    url.searchParams.delete("import_done");
+  }
+  window.history.replaceState({}, "", url.toString());
+}
+
 function renderImportStatus(job) {
   importCurrentJob = job || null;
+  if (job?.import_type) {
+    importTypePending = job.import_type;
+  }
   const banner = document.getElementById("importStatusBanner");
   const title = document.getElementById("importStatusTitle");
   const meta = document.getElementById("importStatusMeta");
@@ -128,12 +174,14 @@ function renderImportStatus(job) {
 
   banner.className = `import-status visible ${job.status || "processing"}`;
   title.textContent = job.message || "Importacion en proceso.";
+  const labels = getImportLabels(job);
   meta.innerHTML = [
-    `Total filas: ${formatMiles(job.total_rows || 0)}`,
-    `Procesadas: ${formatMiles(job.processed_rows || 0)}`,
-    `Exitosos: ${formatMiles(job.inserted || 0)}`,
-    `Repetidos: ${formatMiles(job.ignored || 0)}`,
-    `Invalidos: ${formatMiles(job.invalid || 0)}`
+    `Total: ${formatMiles(job.total_rows || 0)}`,
+    `${labels.processed}: ${formatMiles(job.processed_rows || 0)}`,
+    `${labels.inserted}: ${formatMiles(job.inserted || 0)}`,
+    `${labels.merged}: ${formatMiles(job.merged || 0)}`,
+    `${labels.ignored}: ${formatMiles(job.ignored || 0)}`,
+    `${labels.invalid}: ${formatMiles(job.invalid || 0)}`
   ]
     .map((item) => `<span>${item}</span>`)
     .join("");
@@ -149,14 +197,20 @@ function renderImportProgressModal(job) {
   const percentEl = document.getElementById("importProgressPercent");
   const heading = document.getElementById("importProgressHeading");
   const message = document.getElementById("importProgressMessage");
+  const processedLabel = document.getElementById("importProcessedLabel");
+  const insertedLabel = document.getElementById("importInsertedLabel");
+  const mergedLabel = document.getElementById("importMergedLabel");
+  const ignoredLabel = document.getElementById("importIgnoredLabel");
+  const invalidLabel = document.getElementById("importInvalidLabel");
   const processed = document.getElementById("importProcessedValue");
   const inserted = document.getElementById("importInsertedValue");
+  const merged = document.getElementById("importMergedValue");
   const ignored = document.getElementById("importIgnoredValue");
   const invalid = document.getElementById("importInvalidValue");
   const detail = document.getElementById("importProgressDetail");
   const viewBtn = document.getElementById("importViewReportBtn");
   const closeBtn = document.getElementById("importCloseProgressBtn");
-  if (!overlay || !modal || !ring || !percentEl || !heading || !message || !processed || !inserted || !ignored || !invalid || !detail || !viewBtn || !closeBtn) {
+  if (!overlay || !modal || !ring || !percentEl || !heading || !message || !processedLabel || !insertedLabel || !mergedLabel || !ignoredLabel || !invalidLabel || !processed || !inserted || !merged || !ignored || !invalid || !detail || !viewBtn || !closeBtn) {
     return;
   }
 
@@ -170,16 +224,23 @@ function renderImportProgressModal(job) {
   const processedRows = Number(job.processed_rows || 0);
   const percent = total > 0 ? Math.min(100, Math.round((processedRows / total) * 100)) : 0;
   const progressDeg = `${Math.max(percent, job.status === "success" || job.status === "partial" ? 100 : 0) * 3.6}deg`;
+  const labels = getImportLabels(job);
 
   ring.className = `import-progress-ring ${job.status || "processing"}`;
   ring.style.setProperty("--progress", progressDeg);
   percentEl.textContent = `${percent}%`;
+  processedLabel.textContent = labels.processed;
+  insertedLabel.textContent = labels.inserted;
+  mergedLabel.textContent = labels.merged;
+  ignoredLabel.textContent = labels.ignored;
+  invalidLabel.textContent = labels.invalid;
   heading.textContent = job.status === "processing" || job.status === "pending"
-    ? "Carga de Excel en progreso"
-    : "Carga de Excel finalizada";
-  message.textContent = job.message || (importJustStarted ? "Preparando carga..." : "Importacion en proceso.");
+    ? labels.headingProgress
+    : labels.headingDone;
+  message.textContent = job.message || (importJustStarted ? "Preparando carga..." : labels.defaultMessage);
   processed.textContent = formatMiles(processedRows);
   inserted.textContent = formatMiles(job.inserted || 0);
+  merged.textContent = formatMiles(job.merged || 0);
   ignored.textContent = formatMiles(job.ignored || 0);
   invalid.textContent = formatMiles(job.invalid || 0);
 
@@ -192,7 +253,7 @@ function renderImportProgressModal(job) {
   if (job.error_code) {
     parts.push(`Error: ${job.error_code}`);
   }
-  detail.textContent = [job.detail || (importJustStarted ? "Subiendo archivo y creando tarea de importacion..." : ""), parts.join(" | ")].filter(Boolean).join(" | ");
+  detail.textContent = [job.detail || (importJustStarted ? labels.pendingDetail : ""), parts.join(" | ")].filter(Boolean).join(" | ");
 
   if (job.status === "processing" || job.status === "pending") {
     overlay.classList.add("visible");
@@ -253,6 +314,10 @@ function renderImportReport(report) {
   const content = document.getElementById("importReportContent");
   if (!overlay || !modal || !content) return;
 
+  const labels = getImportLabels(report);
+  const mergedBlock = Number(report.merged || 0) > 0 || labels.importType === "pdf"
+    ? `<div class="import-progress-stat"><strong>${labels.merged}</strong><span>${formatMiles(report.merged || 0)}</span></div>`
+    : "";
   const invalidList = Array.isArray(report.invalid_details) && report.invalid_details.length
     ? `
       <div class="import-progress-detail">
@@ -270,11 +335,12 @@ function renderImportReport(report) {
       <div class="import-progress-stat"><strong>Estado</strong><span style="font-size:14px;">${escapeAttr(String(report.status || "").toUpperCase())}</span></div>
       <div class="import-progress-stat"><strong>Usuario</strong><span style="font-size:14px;">${escapeAttr(report.user_name || "N/D")}</span></div>
       <div class="import-progress-stat"><strong>Empresa</strong><span style="font-size:14px;">${escapeAttr(report.group_name || "N/D")}</span></div>
-      <div class="import-progress-stat"><strong>Total filas</strong><span>${formatMiles(report.total_rows || 0)}</span></div>
-      <div class="import-progress-stat"><strong>Procesados</strong><span>${formatMiles(report.processed_rows || 0)}</span></div>
-      <div class="import-progress-stat"><strong>Exitosos</strong><span>${formatMiles(report.inserted || 0)}</span></div>
-      <div class="import-progress-stat"><strong>Repetidos</strong><span>${formatMiles(report.ignored || 0)}</span></div>
-      <div class="import-progress-stat"><strong>Invalidos</strong><span>${formatMiles(report.invalid || 0)}</span></div>
+      <div class="import-progress-stat"><strong>Total</strong><span>${formatMiles(report.total_rows || 0)}</span></div>
+      <div class="import-progress-stat"><strong>${labels.processed}</strong><span>${formatMiles(report.processed_rows || 0)}</span></div>
+      <div class="import-progress-stat"><strong>${labels.inserted}</strong><span>${formatMiles(report.inserted || 0)}</span></div>
+      ${mergedBlock}
+      <div class="import-progress-stat"><strong>${labels.ignored}</strong><span>${formatMiles(report.ignored || 0)}</span></div>
+      <div class="import-progress-stat"><strong>${labels.invalid}</strong><span>${formatMiles(report.invalid || 0)}</span></div>
       <div class="import-progress-stat"><strong>Error</strong><span style="font-size:14px;">${report.error_code ? "ERROR " + report.error_code : "Sin error"}</span></div>
       <div class="import-progress-stat"><strong>Inicio</strong><span style="font-size:14px;">${escapeAttr(formatDateTime(report.started_at))}</span></div>
       <div class="import-progress-stat"><strong>Fin</strong><span style="font-size:14px;">${escapeAttr(formatDateTime(report.finished_at))}</span></div>
@@ -333,6 +399,13 @@ async function pollImportStatus() {
         window.clearTimeout(importStatusTimer);
         importStatusTimer = null;
       }
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("import_done") !== "1" && payload.job.job_id) {
+        url.searchParams.set("import_job", payload.job.job_id);
+        url.searchParams.set("import_done", "1");
+        window.location.replace(url.toString());
+        return;
+      }
       return;
     }
   } catch (error) {
@@ -341,18 +414,23 @@ async function pollImportStatus() {
   }
 }
 
-function mostrarImportacionInmediata() {
+function mostrarImportacionInmediata(importType = "excel", total = 0, filename = "") {
   importJustStarted = true;
+  importTypePending = importType;
+  const labels = getImportLabels({ import_type: importType });
   renderImportStatus({
     job_id: "",
+    import_type: importType,
     status: "pending",
-    message: "Importacion iniciada.",
-    total_rows: 0,
+    message: importType === "pdf" ? "Carga masiva de PDF iniciada." : "Importacion iniciada.",
+    total_rows: total,
     processed_rows: 0,
     inserted: 0,
+    merged: 0,
     ignored: 0,
     invalid: 0,
-    detail: "Subiendo archivo y preparando el analisis del Excel...",
+    source_filename: filename,
+    detail: labels.pendingDetail,
     user_name: "",
     group_name: "",
     started_at: new Date().toISOString(),
@@ -793,6 +871,9 @@ if (resultado) {
 }
 
 if (IMPORT_JOB) {
+  if (new URL(window.location.href).searchParams.get("import_done") === "1" && IMPORT_JOB.job_id) {
+    syncImportJobUrl(IMPORT_JOB.job_id, false);
+  }
   renderImportStatus(IMPORT_JOB);
   if (IMPORT_JOB.status === "processing" || IMPORT_JOB.status === "pending") {
     importStatusTimer = window.setTimeout(pollImportStatus, 1200);

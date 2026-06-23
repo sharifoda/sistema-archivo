@@ -182,11 +182,16 @@
         <strong>{{ report.source_filename or ("Importacion " ~ report.job_id[:8]) }}</strong>
         <div class="report-meta">
           <span>Usuario: {{ report.user_name or "N/D" }}</span>
-          <span>Filas: {{ report.total_rows }}</span>
+          <span>{{ "PDFs" if report.import_type == "pdf" else "Filas" }}: {{ report.total_rows }}</span>
           <span>Procesados: {{ report.processed_rows }}</span>
-          <span>Exitosos: {{ report.inserted }}</span>
-          <span>Ignorados: {{ report.ignored }}</span>
-          <span>Inválidos: {{ report.invalid }}</span>
+          <span>{{ "Nuevos" if report.import_type == "pdf" else "Exitosos" }}: {{ report.inserted }}</span>
+          {% if report.import_type == "pdf" %}
+          <span>Unidos: {{ report.merged }}</span>
+          <span>No encontrados: {{ report.ignored }}</span>
+          {% else %}
+          <span>Repetidos: {{ report.ignored }}</span>
+          {% endif %}
+          <span>Invalidos: {{ report.invalid }}</span>
           <span>Fin: {{ (report.finished_at or report.started_at)|hora_col if (report.finished_at or report.started_at) else "N/D" }}</span>
         </div>
       </div>
@@ -206,7 +211,7 @@
 
 <div id="importReportOverlay" class="modal-overlay"></div>
 <div id="importReportModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
-  <h3 id="reportModalTitle">Informe de importación Excel</h3>
+  <h3 id="reportModalTitle">Informe de importacion</h3>
   <div id="importReportContent"></div>
   <div style="display:flex; justify-content:flex-end; margin-top:16px;">
     <button type="button" class="btn" onclick="cerrarInformeImportacion()">Cerrar</button>
@@ -237,15 +242,47 @@
     return date.toLocaleString("es-CO", { timeZone: "America/Bogota" });
   }
 
+  function getImportLabels(report) {
+    const importType = String(report?.import_type || "excel").toLowerCase();
+    if (importType === "pdf") {
+      return {
+        importType,
+        title: "Informe de carga PDF",
+        total: "Total PDFs",
+        inserted: "Nuevos",
+        merged: "Unidos",
+        ignored: "No encontrados",
+        invalid: "Invalidos detectados"
+      };
+    }
+    return {
+      importType,
+      title: "Informe de importacion Excel",
+      total: "Total filas",
+      inserted: "Exitosos",
+      merged: "Unidos",
+      ignored: "Repetidos",
+      invalid: "Invalidos detectados"
+    };
+  }
+
   function renderImportReport(report) {
     const overlay = document.getElementById("importReportOverlay");
     const modal = document.getElementById("importReportModal");
     const content = document.getElementById("importReportContent");
+    const title = document.getElementById("reportModalTitle");
     if (!overlay || !modal || !content) return;
 
+    const labels = getImportLabels(report);
+    if (title) title.textContent = labels.title;
+
     const invalidList = Array.isArray(report.invalid_details) && report.invalid_details.length
-      ? `<div class="report-detail"><strong>Inválidos detectados</strong><ul class="report-invalid-list">${report.invalid_details.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
-      : `<div class="report-detail"><strong>Inválidos detectados</strong><div>No hubo registros inválidos.</div></div>`;
+      ? `<div class="report-detail"><strong>${labels.invalid}</strong><ul class="report-invalid-list">${report.invalid_details.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+      : `<div class="report-detail"><strong>${labels.invalid}</strong><div>No hubo registros invalidos.</div></div>`;
+
+    const mergedBlock = Number(report.merged || 0) > 0 || labels.importType === "pdf"
+      ? `<div class="report-stat"><strong>${labels.merged}</strong><span>${escapeHtml(report.merged || 0)}</span></div>`
+      : "";
 
     content.innerHTML = `
       <div class="report-grid">
@@ -253,11 +290,12 @@
         <div class="report-stat"><strong>Estado</strong><span>${escapeHtml(String(report.status || "").toUpperCase())}</span></div>
         <div class="report-stat"><strong>Usuario</strong><span>${escapeHtml(report.user_name || "N/D")}</span></div>
         <div class="report-stat"><strong>Empresa</strong><span>${escapeHtml(report.group_name || "N/D")}</span></div>
-        <div class="report-stat"><strong>Total filas</strong><span>${escapeHtml(report.total_rows || 0)}</span></div>
+        <div class="report-stat"><strong>${labels.total}</strong><span>${escapeHtml(report.total_rows || 0)}</span></div>
         <div class="report-stat"><strong>Procesados</strong><span>${escapeHtml(report.processed_rows || 0)}</span></div>
-        <div class="report-stat"><strong>Exitosos</strong><span>${escapeHtml(report.inserted || 0)}</span></div>
-        <div class="report-stat"><strong>Repetidos</strong><span>${escapeHtml(report.ignored || 0)}</span></div>
-        <div class="report-stat"><strong>Inválidos</strong><span>${escapeHtml(report.invalid || 0)}</span></div>
+        <div class="report-stat"><strong>${labels.inserted}</strong><span>${escapeHtml(report.inserted || 0)}</span></div>
+        ${mergedBlock}
+        <div class="report-stat"><strong>${labels.ignored}</strong><span>${escapeHtml(report.ignored || 0)}</span></div>
+        <div class="report-stat"><strong>Invalidos</strong><span>${escapeHtml(report.invalid || 0)}</span></div>
         <div class="report-stat"><strong>Error</strong><span>${report.error_code ? "ERROR " + escapeHtml(report.error_code) : "Sin error"}</span></div>
         <div class="report-stat"><strong>Inicio</strong><span>${escapeHtml(formatDateTime(report.started_at))}</span></div>
         <div class="report-stat"><strong>Fin</strong><span>${escapeHtml(formatDateTime(report.finished_at))}</span></div>

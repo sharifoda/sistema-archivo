@@ -506,17 +506,18 @@
     <div id="importProgressRing" class="import-progress-ring processing">
       <span id="importProgressPercent" class="import-progress-percent">0%</span>
     </div>
-    <div class="import-progress-copy">
+  <div class="import-progress-copy">
       <h3 id="importProgressHeading">Importacion de Excel</h3>
       <p id="importProgressMessage">Preparando carga...</p>
     </div>
   </div>
 
   <div class="import-progress-grid">
-    <div class="import-progress-stat"><strong>Procesados</strong><span id="importProcessedValue">0</span></div>
-    <div class="import-progress-stat"><strong>Exitosos</strong><span id="importInsertedValue">0</span></div>
-    <div class="import-progress-stat"><strong>Repetidos</strong><span id="importIgnoredValue">0</span></div>
-    <div class="import-progress-stat"><strong>Invalidos</strong><span id="importInvalidValue">0</span></div>
+    <div class="import-progress-stat"><strong id="importProcessedLabel">Procesados</strong><span id="importProcessedValue">0</span></div>
+    <div class="import-progress-stat"><strong id="importInsertedLabel">Exitosos</strong><span id="importInsertedValue">0</span></div>
+    <div class="import-progress-stat"><strong id="importMergedLabel">Unidos</strong><span id="importMergedValue">0</span></div>
+    <div class="import-progress-stat"><strong id="importIgnoredLabel">Repetidos</strong><span id="importIgnoredValue">0</span></div>
+    <div class="import-progress-stat"><strong id="importInvalidLabel">Invalidos</strong><span id="importInvalidValue">0</span></div>
   </div>
 
   <div id="importProgressDetail" class="import-progress-detail">Espera a que finalice la carga.</div>
@@ -876,7 +877,7 @@ document.addEventListener("click", function (event) {
 document.getElementById("excelFileInput")?.addEventListener("change", function () {
   if (this.files && this.files.length > 0) {
     if (typeof window.mostrarImportacionInmediata === "function") {
-      window.mostrarImportacionInmediata();
+      window.mostrarImportacionInmediata("excel", this.files.length, this.files[0]?.name || "");
     }
     document.getElementById("excelUploadForm").submit();
   }
@@ -884,6 +885,9 @@ document.getElementById("excelFileInput")?.addEventListener("change", function (
 
 document.getElementById("pdfBulkFileInput")?.addEventListener("change", function () {
   if (this.files && this.files.length > 0) {
+    if (typeof window.mostrarImportacionInmediata === "function") {
+      window.mostrarImportacionInmediata("pdf", this.files.length, `${this.files.length} PDF(s)`);
+    }
     document.getElementById("pdfBulkUploadForm").submit();
   }
 });

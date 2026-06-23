@@ -94,6 +94,7 @@ def ensure_import_reports_table():
             CREATE TABLE dbo.importaciones_excel (
                 id INT IDENTITY(1,1) PRIMARY KEY,
                 job_id NVARCHAR(64) NOT NULL UNIQUE,
+                import_type NVARCHAR(20) NOT NULL CONSTRAINT DF_importaciones_excel_import_type DEFAULT ('excel'),
                 usuarioid INT NULL,
                 nombreusuario NVARCHAR(255) NULL,
                 empresa INT NULL,
@@ -104,6 +105,7 @@ def ensure_import_reports_table():
                 total_rows INT NOT NULL CONSTRAINT DF_importaciones_excel_total_rows DEFAULT (0),
                 processed_rows INT NOT NULL CONSTRAINT DF_importaciones_excel_processed_rows DEFAULT (0),
                 inserted INT NOT NULL CONSTRAINT DF_importaciones_excel_inserted DEFAULT (0),
+                merged INT NOT NULL CONSTRAINT DF_importaciones_excel_merged DEFAULT (0),
                 ignored INT NOT NULL CONSTRAINT DF_importaciones_excel_ignored DEFAULT (0),
                 invalid INT NOT NULL CONSTRAINT DF_importaciones_excel_invalid DEFAULT (0),
                 invalid_details NVARCHAR(MAX) NULL,
@@ -112,6 +114,20 @@ def ensure_import_reports_table():
                 finished_at DATETIME2 NULL,
                 created_at DATETIME2 NOT NULL CONSTRAINT DF_importaciones_excel_created_at DEFAULT (SYSDATETIME())
             );
+        END
+
+        IF COL_LENGTH('dbo.importaciones_excel', 'import_type') IS NULL
+        BEGIN
+            ALTER TABLE dbo.importaciones_excel
+            ADD import_type NVARCHAR(20) NOT NULL
+                CONSTRAINT DF_importaciones_excel_import_type_legacy DEFAULT ('excel');
+        END
+
+        IF COL_LENGTH('dbo.importaciones_excel', 'merged') IS NULL
+        BEGIN
+            ALTER TABLE dbo.importaciones_excel
+            ADD merged INT NOT NULL
+                CONSTRAINT DF_importaciones_excel_merged_legacy DEFAULT (0);
         END
         """
     )
@@ -143,7 +159,8 @@ def _save_import_report(job):
         cur.execute(
             """
             UPDATE importaciones_excel
-            SET usuarioid = %s,
+            SET import_type = %s,
+                usuarioid = %s,
                 nombreusuario = %s,
                 empresa = %s,
                 nombreempresa = %s,
@@ -153,6 +170,7 @@ def _save_import_report(job):
                 total_rows = %s,
                 processed_rows = %s,
                 inserted = %s,
+                merged = %s,
                 ignored = %s,
                 invalid = %s,
                 invalid_details = %s,
@@ -162,6 +180,7 @@ def _save_import_report(job):
             WHERE job_id = %s
             """,
             (
+                job.get("import_type", "excel"),
                 job.get("user_id"),
                 job.get("user_name"),
                 job.get("group_id"),
@@ -172,6 +191,7 @@ def _save_import_report(job):
                 job.get("total_rows", 0),
                 job.get("processed_rows", 0),
                 job.get("inserted", 0),
+                job.get("merged", 0),
                 job.get("ignored", 0),
                 job.get("invalid", 0),
                 invalid_details_text,
@@ -185,14 +205,15 @@ def _save_import_report(job):
         cur.execute(
             """
             INSERT INTO importaciones_excel (
-                job_id, usuarioid, nombreusuario, empresa, nombreempresa, archivo_nombre,
-                status, error_code, total_rows, processed_rows, inserted, ignored, invalid,
+                job_id, import_type, usuarioid, nombreusuario, empresa, nombreempresa, archivo_nombre,
+                status, error_code, total_rows, processed_rows, inserted, merged, ignored, invalid,
                 invalid_details, detail, started_at, finished_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 job["job_id"],
+                job.get("import_type", "excel"),
                 job.get("user_id"),
                 job.get("user_name"),
                 job.get("group_id"),
@@ -203,6 +224,7 @@ def _save_import_report(job):
                 job.get("total_rows", 0),
                 job.get("processed_rows", 0),
                 job.get("inserted", 0),
+                job.get("merged", 0),
                 job.get("ignored", 0),
                 job.get("invalid", 0),
                 invalid_details_text,
@@ -227,8 +249,8 @@ def get_import_report(job_id):
     cur.execute(
         """
         SELECT
-            job_id, usuarioid, nombreusuario, empresa, nombreempresa, archivo_nombre,
-            status, error_code, total_rows, processed_rows, inserted, ignored, invalid,
+            job_id, import_type, usuarioid, nombreusuario, empresa, nombreempresa, archivo_nombre,
+            status, error_code, total_rows, processed_rows, inserted, merged, ignored, invalid,
             invalid_details, detail, started_at, finished_at, created_at
         FROM importaciones_excel
         WHERE job_id = %s
@@ -242,23 +264,25 @@ def get_import_report(job_id):
         return None
     return {
         "job_id": row[0],
-        "user_id": row[1],
-        "user_name": row[2],
-        "group_id": row[3],
-        "group_name": row[4],
-        "source_filename": row[5],
-        "status": row[6],
-        "error_code": row[7],
-        "total_rows": row[8],
-        "processed_rows": row[9],
-        "inserted": row[10],
-        "ignored": row[11],
-        "invalid": row[12],
-        "invalid_details": _json_loads_safe(row[13], []),
-        "detail": row[14] or "",
-        "started_at": row[15].isoformat() if row[15] else None,
-        "finished_at": row[16].isoformat() if row[16] else None,
-        "created_at": row[17].isoformat() if row[17] else None,
+        "import_type": row[1] or "excel",
+        "user_id": row[2],
+        "user_name": row[3],
+        "group_id": row[4],
+        "group_name": row[5],
+        "source_filename": row[6],
+        "status": row[7],
+        "error_code": row[8],
+        "total_rows": row[9],
+        "processed_rows": row[10],
+        "inserted": row[11],
+        "merged": row[12],
+        "ignored": row[13],
+        "invalid": row[14],
+        "invalid_details": _json_loads_safe(row[15], []),
+        "detail": row[16] or "",
+        "started_at": row[17].isoformat() if row[17] else None,
+        "finished_at": row[18].isoformat() if row[18] else None,
+        "created_at": row[19].isoformat() if row[19] else None,
     }
 
 
@@ -271,8 +295,8 @@ def get_recent_import_reports(limit=10, group_id=None):
         cur.execute(
             f"""
             SELECT TOP {limit}
-                job_id, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
-                total_rows, processed_rows, inserted, ignored, invalid, started_at, finished_at
+                job_id, import_type, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
+                total_rows, processed_rows, inserted, merged, ignored, invalid, started_at, finished_at
             FROM importaciones_excel
             WHERE empresa = %s
             ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC
@@ -283,8 +307,8 @@ def get_recent_import_reports(limit=10, group_id=None):
         cur.execute(
             f"""
             SELECT TOP {limit}
-                job_id, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
-                total_rows, processed_rows, inserted, ignored, invalid, started_at, finished_at
+                job_id, import_type, nombreusuario, nombreempresa, archivo_nombre, status, error_code,
+                total_rows, processed_rows, inserted, merged, ignored, invalid, started_at, finished_at
             FROM importaciones_excel
             ORDER BY COALESCE(finished_at, started_at, created_at) DESC, id DESC
             """
@@ -295,18 +319,20 @@ def get_recent_import_reports(limit=10, group_id=None):
     return [
         {
             "job_id": r[0],
-            "user_name": r[1],
-            "group_name": r[2],
-            "source_filename": r[3],
-            "status": r[4],
-            "error_code": r[5],
-            "total_rows": r[6],
-            "processed_rows": r[7],
-            "inserted": r[8],
-            "ignored": r[9],
-            "invalid": r[10],
-            "started_at": r[11].isoformat() if r[11] else None,
-            "finished_at": r[12].isoformat() if r[12] else None,
+            "import_type": r[1] or "excel",
+            "user_name": r[2],
+            "group_name": r[3],
+            "source_filename": r[4],
+            "status": r[5],
+            "error_code": r[6],
+            "total_rows": r[7],
+            "processed_rows": r[8],
+            "inserted": r[9],
+            "merged": r[10],
+            "ignored": r[11],
+            "invalid": r[12],
+            "started_at": r[13].isoformat() if r[13] else None,
+            "finished_at": r[14].isoformat() if r[14] else None,
         }
         for r in rows
     ]
@@ -336,12 +362,14 @@ def puede_ver_reporte_importacion(job):
 def build_import_job_payload(job_id, **extra):
     payload = {
         "job_id": job_id,
+        "import_type": "excel",
         "status": "pending",
         "message": "Importacion en cola.",
         "error_code": None,
         "total_rows": 0,
         "processed_rows": 0,
         "inserted": 0,
+        "merged": 0,
         "ignored": 0,
         "invalid": 0,
         "invalid_details": [],
@@ -358,6 +386,26 @@ def build_import_job_payload(job_id, **extra):
     }
     payload.update(extra)
     return payload
+
+
+def get_import_labels(import_type):
+    if str(import_type or "excel").lower() == "pdf":
+        return {
+            "kind": "pdf",
+            "item": "PDF",
+            "plural": "PDFs",
+            "success_label": "nuevos",
+            "merged_label": "unidos",
+            "ignored_label": "no encontrados",
+        }
+    return {
+        "kind": "excel",
+        "item": "Excel",
+        "plural": "filas",
+        "success_label": "exitosos",
+        "merged_label": "unidos",
+        "ignored_label": "repetidos",
+    }
 
 
 def set_import_job(job_id, **updates):
@@ -1094,6 +1142,243 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
             pass
 
 
+def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_ip=""):
+    total_files = len(file_names or [])
+    set_import_job(
+        job_id,
+        import_type="pdf",
+        status="processing",
+        message="Carga masiva de PDF en proceso.",
+        total_rows=total_files,
+        processed_rows=0,
+        inserted=0,
+        merged=0,
+        ignored=0,
+        invalid=0,
+        invalid_details=[],
+        error_code=None,
+        finished_at=None,
+        report_saved=False,
+    )
+
+    conn = get_db()
+    cur = conn.cursor()
+    nuevos = 0
+    unidos = 0
+    no_encontrados = 0
+    invalidos = 0
+    invalid_details = []
+    procesados = 0
+
+    try:
+        for index, filename in enumerate(file_names, start=1):
+            abs_path = os.path.join(job_dir, filename)
+            procesados = index
+
+            if not filename.lower().endswith(".pdf"):
+                invalidos += 1
+                add_invalid_detail(invalid_details, filename, reason="extension invalida")
+                set_import_job(
+                    job_id,
+                    processed_rows=procesados,
+                    inserted=nuevos,
+                    merged=unidos,
+                    ignored=no_encontrados,
+                    invalid=invalidos,
+                    invalid_details=invalid_details,
+                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                )
+                continue
+
+            numero = obtener_numero_desde_nombre_pdf(filename)
+            if numero is None:
+                invalidos += 1
+                add_invalid_detail(invalid_details, filename, reason="nombre de archivo invalido")
+                set_import_job(
+                    job_id,
+                    processed_rows=procesados,
+                    inserted=nuevos,
+                    merged=unidos,
+                    ignored=no_encontrados,
+                    invalid=invalidos,
+                    invalid_details=invalid_details,
+                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                )
+                continue
+
+            cur.execute(
+                "SELECT id, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero, grupo_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                no_encontrados += 1
+                add_invalid_detail(invalid_details, filename, reason="documento no encontrado")
+                set_import_job(
+                    job_id,
+                    processed_rows=procesados,
+                    inserted=nuevos,
+                    merged=unidos,
+                    ignored=no_encontrados,
+                    invalid=invalidos,
+                    invalid_details=invalid_details,
+                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                )
+                continue
+
+            archivo_id, pdf_old = row
+
+            try:
+                with open(abs_path, "rb") as fh:
+                    pdf_bytes = fh.read()
+            except Exception:
+                invalidos += 1
+                add_invalid_detail(invalid_details, filename, reason="no se pudo leer el archivo")
+                set_import_job(
+                    job_id,
+                    processed_rows=procesados,
+                    inserted=nuevos,
+                    merged=unidos,
+                    ignored=no_encontrados,
+                    invalid=invalidos,
+                    invalid_details=invalid_details,
+                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                )
+                continue
+
+            class StoredUpload:
+                def __init__(self, name, content):
+                    self.filename = name
+                    self.stream = BytesIO(content)
+
+                def save(self, path):
+                    self.stream.seek(0)
+                    with open(path, "wb") as output:
+                        output.write(self.stream.read())
+                    self.stream.seek(0)
+
+            file_obj = StoredUpload(filename, pdf_bytes)
+
+            if pdf_old:
+                pdf_name = unir_pdf_existente(pdf_old, file_obj, numero, grupo_id)
+                if not pdf_name:
+                    invalidos += 1
+                    add_invalid_detail(invalid_details, filename, reason="no se pudo unir el PDF")
+                    set_import_job(
+                        job_id,
+                        processed_rows=procesados,
+                        inserted=nuevos,
+                        merged=unidos,
+                        ignored=no_encontrados,
+                        invalid=invalidos,
+                        invalid_details=invalid_details,
+                        detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                    )
+                    continue
+                unidos += 1
+            else:
+                pdf_name = guardar_pdf(file_obj, numero, grupo_id)
+                nuevos += 1
+
+            cur.execute(
+                "UPDATE archivos SET pdf_path = %s WHERE id = %s AND grupo_id = %s",
+                (pdf_name, archivo_id, grupo_id)
+            )
+
+            if index % 25 == 0:
+                conn.commit()
+
+            set_import_job(
+                job_id,
+                processed_rows=procesados,
+                inserted=nuevos,
+                merged=unidos,
+                ignored=no_encontrados,
+                invalid=invalidos,
+                invalid_details=invalid_details,
+                detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+            )
+
+        conn.commit()
+
+        registrar_movimiento(
+            usuario_id,
+            grupo_id,
+            entidad="archivo",
+            entidad_id=None,
+            accion="CARGA_MASIVA_PDF",
+            datos_despues={
+                "procesados": procesados,
+                "nuevos": nuevos,
+                "unidos": unidos,
+                "no_encontrados": no_encontrados,
+                "invalidos": invalidos,
+                "archivos_lote": total_files,
+            }
+        )
+
+        registrar_log(
+            usuario_id,
+            f"CARGA_MASIVA_PDF lote={total_files} nuevos={nuevos} unidos={unidos} no_encontrados={no_encontrados} invalidos={invalidos}",
+            client_ip,
+            grupo_id
+        )
+
+        final_status = "success" if not no_encontrados and not invalidos else "partial"
+        set_import_job(
+            job_id,
+            import_type="pdf",
+            status=final_status,
+            message=(
+                "Carga masiva de PDF finalizada correctamente."
+                if final_status == "success"
+                else "Carga masiva de PDF finalizada con observaciones."
+            ),
+            processed_rows=total_files,
+            inserted=nuevos,
+            merged=unidos,
+            ignored=no_encontrados,
+            invalid=invalidos,
+            invalid_details=invalid_details,
+            error_code=None if final_status == "success" else 503,
+            detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+            finished_at=datetime.utcnow().isoformat(),
+            report_saved=True,
+        )
+        persist_import_report(get_import_job(job_id))
+    except Exception:
+        conn.rollback()
+        app.logger.exception("Error en carga masiva de PDF")
+        set_import_job(
+            job_id,
+            import_type="pdf",
+            status="failed",
+            message=error_text(904, fallback="La carga masiva de PDF falló."),
+            processed_rows=procesados,
+            inserted=nuevos,
+            merged=unidos,
+            ignored=no_encontrados,
+            invalid=invalidos,
+            invalid_details=invalid_details,
+            error_code=904,
+            finished_at=datetime.utcnow().isoformat(),
+            report_saved=True,
+        )
+        persist_import_report(get_import_job(job_id))
+    finally:
+        cur.close()
+        conn.close()
+        for filename in file_names or []:
+            try:
+                os.remove(os.path.join(job_dir, filename))
+            except Exception:
+                pass
+        try:
+            os.rmdir(job_dir)
+        except Exception:
+            pass
+
+
 # ---------------- LOGIN ----------------
 @app.route("/", methods=["GET", "POST"])
 def login():
@@ -1575,6 +1860,16 @@ def grupos():
                     texto = f"Se modifico el documento {doc_num}"
                 elif entidad == "archivo" and accion == "ELIMINAR_ARCHIVO":
                     texto = f"Se elimino el documento {doc_num}"
+                elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
+                    nuevos = despues.get("nuevos", 0)
+                    unidos = despues.get("unidos", 0)
+                    no_encontrados = despues.get("no_encontrados", 0)
+                    invalidos = despues.get("invalidos", 0)
+                    lote = despues.get("archivos_lote", 0)
+                    texto = (
+                        f"CARGA_MASIVA_PDF: lote {lote}, {nuevos} nuevos, "
+                        f"{unidos} unidos, {no_encontrados} no encontrados, {invalidos} invalidos"
+                    )
                 elif entidad == "caja" and accion == "CREAR_CAJA":
                     texto = f"Se creo la caja numero {caja_vis}"
                 elif entidad == "caja" and accion == "MODIFICAR_CAJA":
@@ -2230,6 +2525,16 @@ def archivos_legacy():
             texto = f"Se modifico el documento {doc_num}"
         elif entidad == "archivo" and accion == "ELIMINAR_ARCHIVO":
             texto = f"Se elimino el documento {doc_num}"
+        elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
+            nuevos = despues.get("nuevos", 0)
+            unidos = despues.get("unidos", 0)
+            no_encontrados = despues.get("no_encontrados", 0)
+            invalidos = despues.get("invalidos", 0)
+            lote = despues.get("archivos_lote", 0)
+            texto = (
+                f"CARGA_MASIVA_PDF: lote {lote}, {nuevos} nuevos, "
+                f"{unidos} unidos, {no_encontrados} no encontrados, {invalidos} invalidos"
+            )
         elif entidad == "caja" and accion == "CREAR_CAJA":
             texto = f"Se creo la caja numero {caja_vis}"
         elif entidad == "caja" and accion == "MODIFICAR_CAJA":
@@ -2441,70 +2746,43 @@ def archivo():
                 )
                 return redirect(url_for("archivo"))
 
-            conn = get_db()
-            cur = conn.cursor()
-
-            nuevos = 0
-            unidos = 0
-            no_encontrados = 0
-            invalidos = 0
-
-            for file in pdf_files:
-                if not es_pdf(file):
-                    invalidos += 1
-                    continue
-
-                numero = obtener_numero_desde_nombre_pdf(file.filename)
-                if numero is None:
-                    invalidos += 1
-                    continue
-
-                cur.execute(
-                    "SELECT id, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
-                    (numero, grupo_id)
-                )
-                row = cur.fetchone()
-                if not row:
-                    no_encontrados += 1
-                    continue
-
-                archivo_id, pdf_old = row
+            uploads_dir = os.path.join(app.root_path, "uploads", "imports_pdf", uuid.uuid4().hex)
+            os.makedirs(uploads_dir, exist_ok=True)
+            stored_names = []
+            for index, file in enumerate(pdf_files, start=1):
+                original_name = os.path.basename(file.filename or f"pdf_{index}.pdf")
+                safe_name = secure_filename(original_name) or f"pdf_{index}.pdf"
+                final_name = f"{index:04d}_{safe_name}"
                 file.stream.seek(0)
+                file.save(os.path.join(uploads_dir, final_name))
+                stored_names.append(final_name)
 
-                if pdf_old:
-                    pdf_name = unir_pdf_existente(pdf_old, file, numero, grupo_id)
-                    if not pdf_name:
-                        invalidos += 1
-                        continue
-                    unidos += 1
-                else:
-                    pdf_name = guardar_pdf(file, numero, grupo_id)
-                    nuevos += 1
-
-                cur.execute(
-                    "UPDATE archivos SET pdf_path = %s WHERE id = %s AND grupo_id = %s",
-                    (pdf_name, archivo_id, grupo_id)
-                )
-
-                registrar_movimiento(
-                    session.get("usuario_id"),
-                    grupo_id,
-                    entidad="archivo",
-                    entidad_id=archivo_id,
-                    accion="CARGA_MASIVA_PDF",
-                    datos_antes={"pdf_path": pdf_old},
-                    datos_despues={"pdf_path": pdf_name, "numero": numero},
-                )
-
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            flash(
-                f"Carga masiva finalizada. Nuevos: {nuevos}, unidos: {unidos}, no encontrados: {no_encontrados}, invalidos: {invalidos}.",
-                "success" if (nuevos or unidos) else "info"
+            job_id = uuid.uuid4().hex
+            group_name = get_group_name(grupo_id)
+            session["last_import_job_id"] = job_id
+            set_import_job(
+                job_id,
+                import_type="pdf",
+                status="pending",
+                message="Carga masiva de PDF iniciada.",
+                source_filename=f"Carga masiva PDF ({len(pdf_files)} archivos)",
+                user_id=session.get("usuario_id"),
+                user_name=session.get("usuario"),
+                group_id=grupo_id,
+                group_name=group_name,
+                total_rows=len(pdf_files),
+                started_at=datetime.utcnow().isoformat(),
             )
-            return redirect(url_for("archivo"))
+
+            t = threading.Thread(
+                target=importar_pdf_job,
+                args=(uploads_dir, stored_names, grupo_id, session.get("usuario_id"), job_id, request.remote_addr),
+                daemon=True
+            )
+            t.start()
+
+            flash("Carga masiva de PDF iniciada. Espera a que finalice para continuar.", "info")
+            return redirect(url_for("archivo", import_job=job_id))
 
         # ---------- Descarga masiva PDF ----------
         if accion == "descarga_masiva_pdf":

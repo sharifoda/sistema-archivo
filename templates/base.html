@@ -90,6 +90,9 @@
     <div class="pdf-actions" id="pdfSelectedActions">
       <button type="button" class="btn" onclick="abrirSeleccionadas()">Ver seleccionadas</button>
       <button type="button" class="btn" onclick="descargarSeleccionadas()">Descargar seleccionadas</button>
+      {% if puede_editar_pdf_actual %}
+      <button type="button" class="btn" onclick="eliminarSeleccionadasPdf()">Eliminar seleccionadas</button>
+      {% endif %}
     </div>
     <button type="button" class="btn btn-primary" onclick="abrirPdfCompleto()">Ver PDF completo</button>
   </div>
@@ -97,7 +100,10 @@
 
 <div id="pdf-modal-data"
      data-url-base="{{ url_for('ver_pdf', numero=0) }}"
-     data-url-pages="{{ url_for('ver_pdf_paginas', numero=0) }}">
+     data-url-pages="{{ url_for('ver_pdf_paginas', numero=0) }}"
+     data-url-delete-pages="{{ url_for('eliminar_paginas_pdf', numero=0) }}"
+     data-csrf-token="{{ csrf_token() }}"
+     data-can-delete-pages="{{ '1' if puede_editar_pdf_actual else '0' }}">
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>

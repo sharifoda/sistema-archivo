@@ -449,7 +449,10 @@ def csrf_token():
 
 @app.context_processor
 def inject_csrf_token():
-    return {"csrf_token": csrf_token}
+    return {
+        "csrf_token": csrf_token,
+        "puede_editar_pdf_actual": puede_editar_pdf(),
+    }
 
 @app.before_request
 def csrf_protect():
@@ -800,6 +803,13 @@ def obtener_grupo_id():
 
 def supervisor_requerido():
     return session.get("rol") in ("admin", "supervisor")
+
+
+def puede_editar_pdf():
+    grupo_id = obtener_grupo_id()
+    if not grupo_id or not login_requerido():
+        return False
+    return supervisor_requerido() or usuario_puede_eliminar(session.get("usuario_id"), grupo_id)
 
 
 def puede_crear_modificar_cajas():
@@ -1892,6 +1902,11 @@ def grupos():
                     texto = f"Se modifico el documento {doc_num}"
                 elif entidad == "archivo" and accion == "ELIMINAR_ARCHIVO":
                     texto = f"Se elimino el documento {doc_num}"
+                elif entidad == "archivo" and accion == "ELIMINAR_PAGINAS_PDF":
+                    total_eliminadas = despues.get("total_eliminadas", 0)
+                    paginas = despues.get("paginas_eliminadas", [])
+                    paginas_txt = ", ".join(str(p) for p in paginas) if paginas else "N/D"
+                    texto = f"Se eliminaron {total_eliminadas} pagina(s) del PDF del documento {doc_num} ({paginas_txt})"
                 elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
                     nuevos = despues.get("nuevos", 0)
                     unidos = despues.get("unidos", 0)
@@ -2557,6 +2572,11 @@ def archivos_legacy():
             texto = f"Se modifico el documento {doc_num}"
         elif entidad == "archivo" and accion == "ELIMINAR_ARCHIVO":
             texto = f"Se elimino el documento {doc_num}"
+        elif entidad == "archivo" and accion == "ELIMINAR_PAGINAS_PDF":
+            total_eliminadas = despues.get("total_eliminadas", 0)
+            paginas = despues.get("paginas_eliminadas", [])
+            paginas_txt = ", ".join(str(p) for p in paginas) if paginas else "N/D"
+            texto = f"Se eliminaron {total_eliminadas} pagina(s) del PDF del documento {doc_num} ({paginas_txt})"
         elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
             nuevos = despues.get("nuevos", 0)
             unidos = despues.get("unidos", 0)
@@ -4784,6 +4804,118 @@ def ver_pdf_paginas(numero):
         download_name=f"doc_{numero}_seleccion.pdf",
         mimetype="application/pdf"
     )
+
+
+@app.route("/pdf/<int:numero>/pages/delete", methods=["POST"])
+def eliminar_paginas_pdf(numero):
+    if not login_requerido():
+        return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return jsonify({"ok": False, "error": error_text(206)}), 403
+
+    if not puede_editar_pdf():
+        return jsonify({"ok": False, "error": error_text(203)}), 403
+
+    if PdfReader is None or PdfWriter is None:
+        return jsonify({"ok": False, "error": error_text(904, fallback="No se pudo procesar el PDF seleccionado.")}), 500
+
+    pages_raw = request.form.get("pages", "")
+    pages_to_delete = []
+    for p in pages_raw.split(","):
+        p = p.strip()
+        if p.isdigit():
+            pages_to_delete.append(int(p) - 1)
+
+    pages_to_delete = sorted(set(pages_to_delete))
+    if not pages_to_delete:
+        return jsonify({"ok": False, "error": error_text(422, fallback="Debes seleccionar al menos una pagina.")}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+        (numero, grupo_id)
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row or not row[2]:
+        return jsonify({"ok": False, "error": error_text(420)}), 404
+
+    archivo_id, nombre_doc, filename = row
+    path = filename if os.path.isabs(filename) else os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    if not os.path.exists(path):
+        return jsonify({"ok": False, "error": error_text(421)}), 404
+
+    temp_path = f"{path}.tmp"
+    try:
+        reader = PdfReader(path)
+        total_pages = len(reader.pages)
+        valid_delete = [idx for idx in pages_to_delete if 0 <= idx < total_pages]
+
+        if not valid_delete:
+            return jsonify({"ok": False, "error": error_text(422, fallback="No hay paginas validas para eliminar.")}), 400
+
+        if len(valid_delete) >= total_pages:
+            return jsonify({"ok": False, "error": error_text(422, fallback="No puedes eliminar todas las paginas del PDF.")}), 400
+
+        writer = PdfWriter()
+        paginas_eliminadas = []
+        for idx, page in enumerate(reader.pages):
+            if idx in valid_delete:
+                paginas_eliminadas.append(idx + 1)
+                continue
+            writer.add_page(page)
+
+        with open(temp_path, "wb") as fh:
+            writer.write(fh)
+
+        os.replace(temp_path, path)
+
+        registrar_movimiento(
+            session.get("usuario_id"),
+            grupo_id,
+            entidad="archivo",
+            entidad_id=archivo_id,
+            accion="ELIMINAR_PAGINAS_PDF",
+            datos_antes={
+                "numero": numero,
+                "nombre": nombre_doc,
+                "paginas_antes": total_pages,
+            },
+            datos_despues={
+                "numero": numero,
+                "nombre": nombre_doc,
+                "paginas_despues": total_pages - len(paginas_eliminadas),
+                "paginas_eliminadas": paginas_eliminadas,
+                "total_eliminadas": len(paginas_eliminadas),
+            },
+        )
+
+        registrar_log(
+            session.get("usuario_id"),
+            f"ELIMINAR_PAGINAS_PDF numero={numero} eliminadas={len(paginas_eliminadas)} paginas={','.join(str(p) for p in paginas_eliminadas)}",
+            request.remote_addr,
+            grupo_id
+        )
+
+        return jsonify({
+            "ok": True,
+            "message": f"Se eliminaron {len(paginas_eliminadas)} pagina(s) del PDF.",
+            "remaining_pages": total_pages - len(paginas_eliminadas),
+            "deleted_pages": paginas_eliminadas,
+        })
+    except Exception:
+        app.logger.exception("Error eliminando paginas del PDF")
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+        return jsonify({"ok": False, "error": error_text(904, fallback="No se pudieron eliminar las paginas seleccionadas.")}), 500
 
 if __name__ == "__main__":
     app.run(debug=False)

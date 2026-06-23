@@ -716,6 +716,13 @@ tr:hover td {
     box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.22);
 }
 
+.pdf-thumb-page {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+}
+
 .pdf-preview {
     width: 45%;
     border: 1px solid var(--line);

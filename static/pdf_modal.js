@@ -4,13 +4,19 @@
 
   const URL_PDF_BASE = dataEl.dataset.urlBase || "";
   const URL_PAGES_BASE = dataEl.dataset.urlPages || "";
+  const URL_DELETE_PAGES_BASE = dataEl.dataset.urlDeletePages || "";
+  const CSRF_TOKEN = dataEl.dataset.csrfToken || "";
+  const CAN_DELETE_PAGES = dataEl.dataset.canDeletePages === "1";
 
   let pdfDoc = null;
   let currentNumero = null;
   let selectedPages = new Set();
 
-  function buildPdfUrl(numero){
-    return URL_PDF_BASE.replace("/0", "/" + String(numero));
+  function buildPdfUrl(numero, fresh){
+    const base = URL_PDF_BASE.replace("/0", "/" + String(numero));
+    if (!fresh) return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return base + sep + "v=" + Date.now();
   }
   function buildPagesUrl(numero, pages, download){
     const base = URL_PAGES_BASE.replace("/0", "/" + String(numero));
@@ -18,6 +24,9 @@
     params.set("pages", pages.join(","));
     if (download) params.set("download", "1");
     return base + "?" + params.toString();
+  }
+  function buildDeletePagesUrl(numero){
+    return URL_DELETE_PAGES_BASE.replace("/0/", "/" + String(numero) + "/");
   }
 
   function show(id){ document.getElementById(id).style.display = "block"; }
@@ -74,6 +83,12 @@
 
       wrap.appendChild(canvas);
       wrap.appendChild(chk);
+
+      const label = document.createElement("div");
+      label.className = "pdf-thumb-page";
+      label.innerText = "Pagina " + i;
+      wrap.appendChild(label);
+
       thumbs.appendChild(wrap);
 
       if (i === 1){
@@ -99,7 +114,7 @@
     document.getElementById("pdfModalTitle").innerText = "PDF";
     document.getElementById("pdfModalSub").innerText = nombre ? ("Documento: " + nombre) : "";
 
-    const url = buildPdfUrl(numero);
+    const url = buildPdfUrl(numero, true);
     pdfDoc = await pdfjsLib.getDocument(url).promise;
 
     show("pdfModalOverlay");
@@ -125,7 +140,7 @@
 
   window.abrirPdfCompleto = function(){
     if (!currentNumero) return;
-    window.open(buildPdfUrl(currentNumero), "_blank", "noopener");
+    window.open(buildPdfUrl(currentNumero, true), "_blank", "noopener");
   };
 
   window.abrirSeleccionadas = function(){
@@ -138,6 +153,44 @@
     if (!currentNumero || selectedPages.size === 0) return;
     const pages = Array.from(selectedPages).sort((a,b)=>a-b);
     window.open(buildPagesUrl(currentNumero, pages, true), "_blank", "noopener");
+  };
+
+  window.eliminarSeleccionadasPdf = async function(){
+    if (!CAN_DELETE_PAGES || !currentNumero || selectedPages.size === 0) return;
+    const pages = Array.from(selectedPages).sort((a,b)=>a-b);
+    const ok = window.confirm(
+      "Se eliminarán de forma permanente las paginas seleccionadas del PDF. Esta accion no se puede deshacer.\n\nPaginas: " + pages.join(", ")
+    );
+    if (!ok) return;
+
+    try {
+      const body = new URLSearchParams();
+      body.set("_csrf_token", CSRF_TOKEN);
+      body.set("pages", pages.join(","));
+
+      const response = await fetch(buildDeletePagesUrl(currentNumero), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: body.toString(),
+        cache: "no-store"
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        alert(payload?.error || "No se pudieron eliminar las paginas seleccionadas.");
+        return;
+      }
+
+      alert(payload.message || "Paginas eliminadas correctamente.");
+      const currentSub = document.getElementById("pdfModalSub")?.innerText || "";
+      await openPdfModalFromNumero(currentNumero, currentSub.replace(/^Documento:\s*/, ""));
+    } catch (error) {
+      console.error("No se pudieron eliminar las paginas", error);
+      alert("No se pudieron eliminar las paginas seleccionadas.");
+    }
   };
 
   document.addEventListener("click", function(e){

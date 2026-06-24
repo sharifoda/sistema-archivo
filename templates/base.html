@@ -91,11 +91,16 @@
       <button type="button" class="btn" onclick="abrirSeleccionadas()">Ver seleccionadas</button>
       <button type="button" class="btn" onclick="descargarSeleccionadas()">Descargar seleccionadas</button>
       {% if puede_editar_pdf_actual %}
-      <button type="button" class="btn" id="pdfMoveUpBtn" onclick="moverPaginaPdf('up')">Mover arriba</button>
-      <button type="button" class="btn" id="pdfMoveDownBtn" onclick="moverPaginaPdf('down')">Mover abajo</button>
       <button type="button" class="btn" onclick="eliminarSeleccionadasPdf()">Eliminar seleccionadas</button>
       {% endif %}
     </div>
+    {% if puede_editar_pdf_actual %}
+    <div class="pdf-order-actions" id="pdfOrderActions">
+      <span class="pdf-order-note" id="pdfOrderNote">Orden sin cambios</span>
+      <button type="button" class="btn" id="pdfOrderResetBtn" onclick="restablecerOrdenPdf()" disabled>Restablecer</button>
+      <button type="button" class="btn btn-primary" id="pdfOrderConfirmBtn" onclick="confirmarOrdenPdf()" disabled>Confirmar orden</button>
+    </div>
+    {% endif %}
     <button type="button" class="btn btn-primary" onclick="abrirPdfCompleto()">Ver PDF completo</button>
   </div>
 </div>

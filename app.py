@@ -1912,6 +1912,9 @@ def grupos():
                     page_to = despues.get("pagina_destino", "N/D")
                     direction = despues.get("direccion", "N/D")
                     texto = f"Se movio la pagina {page_from} del PDF del documento {doc_num} hacia {direction} (nueva posicion: {page_to})"
+                elif entidad == "archivo" and accion == "REORDENAR_PDF":
+                    total_paginas = despues.get("total_paginas", "N/D")
+                    texto = f"Se reordeno el PDF del documento {doc_num} ({total_paginas} paginas)"
                 elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
                     nuevos = despues.get("nuevos", 0)
                     unidos = despues.get("unidos", 0)
@@ -2587,6 +2590,9 @@ def archivos_legacy():
             page_to = despues.get("pagina_destino", "N/D")
             direction = despues.get("direccion", "N/D")
             texto = f"Se movio la pagina {page_from} del PDF del documento {doc_num} hacia {direction} (nueva posicion: {page_to})"
+        elif entidad == "archivo" and accion == "REORDENAR_PDF":
+            total_paginas = despues.get("total_paginas", "N/D")
+            texto = f"Se reordeno el PDF del documento {doc_num} ({total_paginas} paginas)"
         elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
             nuevos = despues.get("nuevos", 0)
             unidos = despues.get("unidos", 0)
@@ -4943,12 +4949,9 @@ def reordenar_paginas_pdf(numero):
     if PdfReader is None or PdfWriter is None:
         return jsonify({"ok": False, "error": error_text(904, fallback="No se pudo procesar el PDF seleccionado.")}), 500
 
+    order_raw = (request.form.get("order") or "").strip()
     page_raw = (request.form.get("page") or "").strip()
     direction = (request.form.get("direction") or "").strip().lower()
-    if not page_raw.isdigit() or direction not in ("up", "down"):
-        return jsonify({"ok": False, "error": error_text(422, fallback="Solicitud de reorden invalida.")}), 400
-
-    current_page = int(page_raw)
 
     conn = get_db()
     cur = conn.cursor()
@@ -4972,17 +4975,70 @@ def reordenar_paginas_pdf(numero):
     try:
         reader = PdfReader(path)
         total_pages = len(reader.pages)
-        current_idx = current_page - 1
+        if order_raw:
+            try:
+                requested_order = [int(p.strip()) for p in order_raw.split(",") if p.strip()]
+            except Exception:
+                requested_order = []
+            expected_order = list(range(1, total_pages + 1))
+            if sorted(requested_order) != expected_order:
+                return jsonify({"ok": False, "error": error_text(422, fallback="El nuevo orden del PDF no es valido.")}), 400
+            ordered_pages = [page_num - 1 for page_num in requested_order]
+            movimiento_accion = "REORDENAR_PDF"
+            log_texto = f"REORDENAR_PDF numero={numero} total_paginas={total_pages}"
+            movimiento_antes = {
+                "numero": numero,
+                "nombre": nombre_doc,
+                "orden_original": expected_order,
+            }
+            movimiento_despues = {
+                "numero": numero,
+                "nombre": nombre_doc,
+                "orden_nuevo": requested_order,
+                "total_paginas": total_pages,
+            }
+            success_message = "Orden guardado correctamente."
+            response_payload = {
+                "ok": True,
+                "message": success_message,
+            }
+        else:
+            if not page_raw.isdigit() or direction not in ("up", "down"):
+                return jsonify({"ok": False, "error": error_text(422, fallback="Solicitud de reorden invalida.")}), 400
 
-        if current_idx < 0 or current_idx >= total_pages:
-            return jsonify({"ok": False, "error": error_text(422, fallback="La pagina seleccionada no existe.")}), 400
+            current_page = int(page_raw)
+            current_idx = current_page - 1
 
-        new_idx = current_idx - 1 if direction == "up" else current_idx + 1
-        if new_idx < 0 or new_idx >= total_pages:
-            return jsonify({"ok": False, "error": error_text(422, fallback="La pagina ya no puede moverse mas en esa direccion.")}), 400
+            if current_idx < 0 or current_idx >= total_pages:
+                return jsonify({"ok": False, "error": error_text(422, fallback="La pagina seleccionada no existe.")}), 400
 
-        ordered_pages = list(range(total_pages))
-        ordered_pages[current_idx], ordered_pages[new_idx] = ordered_pages[new_idx], ordered_pages[current_idx]
+            new_idx = current_idx - 1 if direction == "up" else current_idx + 1
+            if new_idx < 0 or new_idx >= total_pages:
+                return jsonify({"ok": False, "error": error_text(422, fallback="La pagina ya no puede moverse mas en esa direccion.")}), 400
+
+            ordered_pages = list(range(total_pages))
+            ordered_pages[current_idx], ordered_pages[new_idx] = ordered_pages[new_idx], ordered_pages[current_idx]
+            movimiento_accion = "REORDENAR_PAGINA_PDF"
+            log_texto = f"REORDENAR_PAGINA_PDF numero={numero} pagina={current_page} direccion={direction} nueva_posicion={new_idx + 1}"
+            movimiento_antes = {
+                "numero": numero,
+                "nombre": nombre_doc,
+                "pagina_origen": current_page,
+                "direccion": direction,
+            }
+            movimiento_despues = {
+                "numero": numero,
+                "nombre": nombre_doc,
+                "pagina_origen": current_page,
+                "pagina_destino": new_idx + 1,
+                "direccion": direction,
+            }
+            success_message = f"Pagina movida correctamente hacia {direction}."
+            response_payload = {
+                "ok": True,
+                "message": success_message,
+                "new_page": new_idx + 1,
+            }
 
         writer = PdfWriter()
         for page_idx in ordered_pages:
@@ -4998,34 +5054,19 @@ def reordenar_paginas_pdf(numero):
             grupo_id,
             entidad="archivo",
             entidad_id=archivo_id,
-            accion="REORDENAR_PAGINA_PDF",
-            datos_antes={
-                "numero": numero,
-                "nombre": nombre_doc,
-                "pagina_origen": current_page,
-                "direccion": direction,
-            },
-            datos_despues={
-                "numero": numero,
-                "nombre": nombre_doc,
-                "pagina_origen": current_page,
-                "pagina_destino": new_idx + 1,
-                "direccion": direction,
-            },
+            accion=movimiento_accion,
+            datos_antes=movimiento_antes,
+            datos_despues=movimiento_despues,
         )
 
         registrar_log(
             session.get("usuario_id"),
-            f"REORDENAR_PAGINA_PDF numero={numero} pagina={current_page} direccion={direction} nueva_posicion={new_idx + 1}",
+            log_texto,
             request.remote_addr,
             grupo_id
         )
 
-        return jsonify({
-            "ok": True,
-            "message": f"Pagina movida correctamente hacia {direction}.",
-            "new_page": new_idx + 1,
-        })
+        return jsonify(response_payload)
     except Exception:
         app.logger.exception("Error reordenando paginas del PDF")
         try:

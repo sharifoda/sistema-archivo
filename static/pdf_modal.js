@@ -5,6 +5,7 @@
   const URL_PDF_BASE = dataEl.dataset.urlBase || "";
   const URL_PAGES_BASE = dataEl.dataset.urlPages || "";
   const URL_DELETE_PAGES_BASE = dataEl.dataset.urlDeletePages || "";
+  const URL_REORDER_PAGES_BASE = dataEl.dataset.urlReorderPages || "";
   const CSRF_TOKEN = dataEl.dataset.csrfToken || "";
   const CAN_DELETE_PAGES = dataEl.dataset.canDeletePages === "1";
 
@@ -27,6 +28,9 @@
   }
   function buildDeletePagesUrl(numero){
     return URL_DELETE_PAGES_BASE.replace("/0/", "/" + String(numero) + "/");
+  }
+  function buildReorderPagesUrl(numero){
+    return URL_REORDER_PAGES_BASE.replace("/0/", "/" + String(numero) + "/");
   }
 
   function show(id){ document.getElementById(id).style.display = "block"; }
@@ -99,8 +103,14 @@
 
   function updateSelectedActions(){
     const actions = document.getElementById("pdfSelectedActions");
+    const moveUpBtn = document.getElementById("pdfMoveUpBtn");
+    const moveDownBtn = document.getElementById("pdfMoveDownBtn");
     if (!actions) return;
     actions.style.display = selectedPages.size > 0 ? "flex" : "none";
+    const singleSelected = selectedPages.size === 1;
+    const selectedPage = singleSelected ? Array.from(selectedPages)[0] : null;
+    if (moveUpBtn) moveUpBtn.disabled = !singleSelected || selectedPage <= 1;
+    if (moveDownBtn) moveDownBtn.disabled = !singleSelected || !pdfDoc || selectedPage >= pdfDoc.numPages;
   }
 
   async function openPdfModalFromNumero(numero, nombre){
@@ -190,6 +200,57 @@
     } catch (error) {
       console.error("No se pudieron eliminar las paginas", error);
       alert("No se pudieron eliminar las paginas seleccionadas.");
+    }
+  };
+
+  window.moverPaginaPdf = async function(direction){
+    if (!CAN_DELETE_PAGES || !currentNumero || selectedPages.size !== 1) return;
+    if (direction !== "up" && direction !== "down") return;
+
+    const selectedPage = Array.from(selectedPages)[0];
+    try {
+      const body = new URLSearchParams();
+      body.set("_csrf_token", CSRF_TOKEN);
+      body.set("page", String(selectedPage));
+      body.set("direction", direction);
+
+      const response = await fetch(buildReorderPagesUrl(currentNumero), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: body.toString(),
+        cache: "no-store"
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        alert(payload?.error || "No se pudo reordenar la pagina seleccionada.");
+        return;
+      }
+
+      const currentSub = document.getElementById("pdfModalSub")?.innerText || "";
+      await openPdfModalFromNumero(currentNumero, currentSub.replace(/^Documento:\s*/, ""));
+      const previewPage = Number(payload.new_page || selectedPage);
+      if (previewPage > 0) {
+        await renderPreview(previewPage);
+      }
+      const thumbs = document.querySelectorAll(".pdf-thumb");
+      thumbs.forEach((thumb) => {
+        const chk = thumb.querySelector('input[type="checkbox"]');
+        const pageNum = Number(thumb.dataset.page);
+        if (!chk) return;
+        if (pageNum === previewPage) {
+          chk.checked = true;
+          selectedPages.add(pageNum);
+          thumb.classList.add("selected");
+        }
+      });
+      updateSelectedActions();
+    } catch (error) {
+      console.error("No se pudo reordenar la pagina", error);
+      alert("No se pudo reordenar la pagina seleccionada.");
     }
   };
 

@@ -1907,6 +1907,11 @@ def grupos():
                     paginas = despues.get("paginas_eliminadas", [])
                     paginas_txt = ", ".join(str(p) for p in paginas) if paginas else "N/D"
                     texto = f"Se eliminaron {total_eliminadas} pagina(s) del PDF del documento {doc_num} ({paginas_txt})"
+                elif entidad == "archivo" and accion == "REORDENAR_PAGINA_PDF":
+                    page_from = despues.get("pagina_origen", antes.get("pagina_origen", "N/D"))
+                    page_to = despues.get("pagina_destino", "N/D")
+                    direction = despues.get("direccion", "N/D")
+                    texto = f"Se movio la pagina {page_from} del PDF del documento {doc_num} hacia {direction} (nueva posicion: {page_to})"
                 elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
                     nuevos = despues.get("nuevos", 0)
                     unidos = despues.get("unidos", 0)
@@ -2577,6 +2582,11 @@ def archivos_legacy():
             paginas = despues.get("paginas_eliminadas", [])
             paginas_txt = ", ".join(str(p) for p in paginas) if paginas else "N/D"
             texto = f"Se eliminaron {total_eliminadas} pagina(s) del PDF del documento {doc_num} ({paginas_txt})"
+        elif entidad == "archivo" and accion == "REORDENAR_PAGINA_PDF":
+            page_from = despues.get("pagina_origen", antes.get("pagina_origen", "N/D"))
+            page_to = despues.get("pagina_destino", "N/D")
+            direction = despues.get("direccion", "N/D")
+            texto = f"Se movio la pagina {page_from} del PDF del documento {doc_num} hacia {direction} (nueva posicion: {page_to})"
         elif entidad == "archivo" and accion == "CARGA_MASIVA_PDF":
             nuevos = despues.get("nuevos", 0)
             unidos = despues.get("unidos", 0)
@@ -4916,6 +4926,114 @@ def eliminar_paginas_pdf(numero):
         except Exception:
             pass
         return jsonify({"ok": False, "error": error_text(904, fallback="No se pudieron eliminar las paginas seleccionadas.")}), 500
+
+
+@app.route("/pdf/<int:numero>/pages/reorder", methods=["POST"])
+def reordenar_paginas_pdf(numero):
+    if not login_requerido():
+        return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return jsonify({"ok": False, "error": error_text(206)}), 403
+
+    if not puede_editar_pdf():
+        return jsonify({"ok": False, "error": error_text(203)}), 403
+
+    if PdfReader is None or PdfWriter is None:
+        return jsonify({"ok": False, "error": error_text(904, fallback="No se pudo procesar el PDF seleccionado.")}), 500
+
+    page_raw = (request.form.get("page") or "").strip()
+    direction = (request.form.get("direction") or "").strip().lower()
+    if not page_raw.isdigit() or direction not in ("up", "down"):
+        return jsonify({"ok": False, "error": error_text(422, fallback="Solicitud de reorden invalida.")}), 400
+
+    current_page = int(page_raw)
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+        (numero, grupo_id)
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row or not row[2]:
+        return jsonify({"ok": False, "error": error_text(420)}), 404
+
+    archivo_id, nombre_doc, filename = row
+    path = filename if os.path.isabs(filename) else os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    if not os.path.exists(path):
+        return jsonify({"ok": False, "error": error_text(421)}), 404
+
+    temp_path = f"{path}.tmp"
+    try:
+        reader = PdfReader(path)
+        total_pages = len(reader.pages)
+        current_idx = current_page - 1
+
+        if current_idx < 0 or current_idx >= total_pages:
+            return jsonify({"ok": False, "error": error_text(422, fallback="La pagina seleccionada no existe.")}), 400
+
+        new_idx = current_idx - 1 if direction == "up" else current_idx + 1
+        if new_idx < 0 or new_idx >= total_pages:
+            return jsonify({"ok": False, "error": error_text(422, fallback="La pagina ya no puede moverse mas en esa direccion.")}), 400
+
+        ordered_pages = list(range(total_pages))
+        ordered_pages[current_idx], ordered_pages[new_idx] = ordered_pages[new_idx], ordered_pages[current_idx]
+
+        writer = PdfWriter()
+        for page_idx in ordered_pages:
+            writer.add_page(reader.pages[page_idx])
+
+        with open(temp_path, "wb") as fh:
+            writer.write(fh)
+
+        os.replace(temp_path, path)
+
+        registrar_movimiento(
+            session.get("usuario_id"),
+            grupo_id,
+            entidad="archivo",
+            entidad_id=archivo_id,
+            accion="REORDENAR_PAGINA_PDF",
+            datos_antes={
+                "numero": numero,
+                "nombre": nombre_doc,
+                "pagina_origen": current_page,
+                "direccion": direction,
+            },
+            datos_despues={
+                "numero": numero,
+                "nombre": nombre_doc,
+                "pagina_origen": current_page,
+                "pagina_destino": new_idx + 1,
+                "direccion": direction,
+            },
+        )
+
+        registrar_log(
+            session.get("usuario_id"),
+            f"REORDENAR_PAGINA_PDF numero={numero} pagina={current_page} direccion={direction} nueva_posicion={new_idx + 1}",
+            request.remote_addr,
+            grupo_id
+        )
+
+        return jsonify({
+            "ok": True,
+            "message": f"Pagina movida correctamente hacia {direction}.",
+            "new_page": new_idx + 1,
+        })
+    except Exception:
+        app.logger.exception("Error reordenando paginas del PDF")
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+        return jsonify({"ok": False, "error": error_text(904, fallback="No se pudo reordenar la pagina seleccionada.")}), 500
 
 if __name__ == "__main__":
     app.run(debug=False)

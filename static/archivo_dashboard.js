@@ -12,6 +12,7 @@ const IMPORT_CLOSE_URL = data.importCloseUrl || "";
 const IMPORT_JOB = data.importJob || null;
 const resultado     = data.resultado;
 const csrfToken     = data.csrfToken || "";
+const EXCEL_BOX_DATA = Array.isArray(data.excelBoxData) ? data.excelBoxData : [];
 const PDF_BULK_DATA = Array.isArray(data.pdfBulkData) ? data.pdfBulkData : [];
 let importStatusTimer = null;
 let importLastInserted = IMPORT_JOB && Number.isFinite(Number(IMPORT_JOB.inserted)) ? Number(IMPORT_JOB.inserted) : 0;
@@ -37,6 +38,12 @@ const BULK_PDF = {
   selectedDocs: new Set()
 };
 
+const EXCEL_DOWNLOAD = {
+  boxes: EXCEL_BOX_DATA,
+  mode: "all",
+  selectedBoxes: new Set()
+};
+
 /* =========================
    Helpers UI
    ========================= */
@@ -58,7 +65,7 @@ function cerrarModal(tipo, limpiarBuscar = false) {
   hide("overlay" + tipo);
   hide("modal" + tipo);
 
-  const modalAbierto = ["Caja", "CajaMasiva", "Doc", "Buscar", "Editar", "PdfDownload"].some((name) => {
+  const modalAbierto = ["Caja", "CajaMasiva", "Doc", "Buscar", "Editar", "PdfDownload", "ExcelDownload"].some((name) => {
     const modal = document.getElementById("modal" + name);
     return modal && modal.style.display === "block";
   });
@@ -543,6 +550,8 @@ if (editarAppendInput && editarRemoveInput) {
   "modalBuscar",
   "overlayEditar",
   "modalEditar",
+  "overlayExcelDownload",
+  "modalExcelDownload",
   "overlayPdfDownload",
   "modalPdfDownload",
   "importReportOverlay",
@@ -562,7 +571,7 @@ if (editarAppendInput && editarRemoveInput) {
 
 // Cerrar modal al hacer click en overlay
 document.addEventListener("click", function (e) {
-  ["Caja", "CajaMasiva", "Doc", "Buscar", "Editar", "PdfDownload"].forEach(tipo => {
+  ["Caja", "CajaMasiva", "Doc", "Buscar", "Editar", "PdfDownload", "ExcelDownload"].forEach(tipo => {
     const ov = document.getElementById("overlay" + tipo);
     if (e.target === ov) {
       cerrarModal(tipo, tipo === "Buscar");
@@ -583,11 +592,130 @@ document.addEventListener("keydown", function (e) {
   cerrarModal("Doc");
   cerrarModal("Buscar", true);
   cerrarModal("Editar");
+  cerrarModal("ExcelDownload");
   cerrarModal("PdfDownload");
 });
 
 function getBulkBox(boxId) {
   return BULK_PDF.boxes.find((box) => box.id === boxId) || null;
+}
+
+function updateExcelSummary() {
+  const summary = document.getElementById("excelBoxesSummary");
+  const selectedList = document.getElementById("excelBoxesSelectedList");
+  if (!summary || !selectedList) return;
+
+  const selected = EXCEL_DOWNLOAD.boxes.filter((box) => EXCEL_DOWNLOAD.selectedBoxes.has(String(box.id)));
+  summary.textContent = selected.length
+    ? `${selected.length} caja${selected.length === 1 ? "" : "s"} seleccionada${selected.length === 1 ? "" : "s"} para exportar.`
+    : "Marca las cajas que quieres incluir en el Excel.";
+
+  if (!selected.length) {
+    selectedList.innerHTML = `<div class="bulk-empty">No has seleccionado cajas todavía.</div>`;
+    return;
+  }
+
+  selectedList.innerHTML = selected.map((box) => `
+    <label class="bulk-doc-item">
+      <div class="bulk-doc-copy">
+        <strong>${box.pendiente ? "Caja 0" : "Caja " + box.numero}</strong>
+        <span>${formatMiles(box.total || 0)} documento${Number(box.total || 0) === 1 ? "" : "s"}${box.pendiente ? " · Pendiente" : ""}</span>
+      </div>
+      <input type="checkbox" checked onchange="toggleExcelBox('${box.id}', this.checked)">
+    </label>
+  `).join("");
+}
+
+function renderExcelBoxes() {
+  const list = document.getElementById("excelBoxesList");
+  if (!list) return;
+
+  if (!EXCEL_DOWNLOAD.boxes.length) {
+    list.innerHTML = `<div class="bulk-empty">No hay cajas disponibles para exportar.</div>`;
+    updateExcelSummary();
+    return;
+  }
+
+  list.innerHTML = EXCEL_DOWNLOAD.boxes.map((box) => {
+    const checked = EXCEL_DOWNLOAD.selectedBoxes.has(String(box.id)) ? "checked" : "";
+    return `
+      <label class="bulk-box-item" style="cursor:pointer;">
+        <input type="checkbox" ${checked} onchange="toggleExcelBox('${box.id}', this.checked)" style="margin-top:2px;">
+        <div class="bulk-box-copy">
+          <strong>${box.pendiente ? "Caja 0" : "Caja " + box.numero}</strong>
+          <span>${formatMiles(box.total || 0)} documento${Number(box.total || 0) === 1 ? "" : "s"}${box.pendiente ? " · Pendiente" : ""}</span>
+        </div>
+      </label>
+    `;
+  }).join("");
+
+  updateExcelSummary();
+}
+
+function setExcelDownloadMode(mode) {
+  EXCEL_DOWNLOAD.mode = mode === "boxes" ? "boxes" : "all";
+  const allBtn = document.getElementById("excelModeAllBtn");
+  const boxesBtn = document.getElementById("excelModeBoxesBtn");
+  const section = document.getElementById("excelDownloadBoxesSection");
+  const scope = document.getElementById("excelDownloadScope");
+
+  if (allBtn) allBtn.classList.toggle("btn-primary", EXCEL_DOWNLOAD.mode === "all");
+  if (boxesBtn) boxesBtn.classList.toggle("btn-primary", EXCEL_DOWNLOAD.mode === "boxes");
+  if (section) section.style.display = EXCEL_DOWNLOAD.mode === "boxes" ? "block" : "none";
+  if (scope) scope.value = EXCEL_DOWNLOAD.mode;
+
+  if (EXCEL_DOWNLOAD.mode === "boxes") {
+    renderExcelBoxes();
+  }
+}
+
+function toggleExcelBox(boxId, checked) {
+  if (checked) {
+    EXCEL_DOWNLOAD.selectedBoxes.add(String(boxId));
+  } else {
+    EXCEL_DOWNLOAD.selectedBoxes.delete(String(boxId));
+  }
+  renderExcelBoxes();
+}
+
+function seleccionarTodasLasCajasExcel() {
+  EXCEL_DOWNLOAD.boxes.forEach((box) => EXCEL_DOWNLOAD.selectedBoxes.add(String(box.id)));
+  renderExcelBoxes();
+}
+
+function limpiarCajasExcel() {
+  EXCEL_DOWNLOAD.selectedBoxes.clear();
+  renderExcelBoxes();
+}
+
+function prepareExcelDownloadModal() {
+  EXCEL_DOWNLOAD.mode = "all";
+  EXCEL_DOWNLOAD.selectedBoxes.clear();
+  const selectedField = document.getElementById("excelSelectedBoxes");
+  if (selectedField) selectedField.value = "";
+  setExcelDownloadMode("all");
+}
+
+function descargarExcelSeleccionado() {
+  const form = document.getElementById("excelDownloadForm");
+  const scope = document.getElementById("excelDownloadScope");
+  const selectedField = document.getElementById("excelSelectedBoxes");
+  if (!form || !scope || !selectedField) return;
+
+  scope.value = EXCEL_DOWNLOAD.mode;
+  if (EXCEL_DOWNLOAD.mode === "boxes") {
+    const selected = Array.from(EXCEL_DOWNLOAD.selectedBoxes);
+    if (!selected.length) {
+      alert("Selecciona al menos una caja para descargar.");
+      return;
+    }
+    selectedField.value = selected.join(",");
+  } else {
+    selectedField.value = "";
+  }
+
+  cerrarModal("ExcelDownload");
+  form.submit();
 }
 
 function updateBulkSummary() {

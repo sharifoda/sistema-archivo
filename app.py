@@ -3434,6 +3434,7 @@ def archivo():
     conn.close()
 
     pdf_bulk_data = []
+    excel_box_data = []
     docs_by_box = {}
     for archivo_id, caja_id, numero, nombre, tipo_doc in pdf_rows:
         docs_by_box.setdefault(caja_id, []).append({
@@ -3445,6 +3446,12 @@ def archivo():
 
     for caja in cajas:
         caja_id = caja[0]
+        excel_box_data.append({
+            "id": caja_id,
+            "numero": caja[1],
+            "total": caja[4],
+            "pendiente": bool(caja[5]),
+        })
         docs = docs_by_box.get(caja_id, [])
         if not docs:
             continue
@@ -3459,6 +3466,7 @@ def archivo():
         cajas=cajas,
         resultado=resultado,
         archivador_mode=archivador_mode,
+        excel_box_data=excel_box_data,
         pdf_bulk_data=pdf_bulk_data,
         import_job=import_job,
         import_status_url=url_for("importacion_estado", job_id=import_job_id) if import_job_id else None,
@@ -4579,7 +4587,7 @@ def archivador_eliminar():
     flash("Elementos eliminados permanentemente.", "success")
     return redirect(url_for("archivo") + "?view=especial")
 
-@app.route("/export/excel")
+@app.route("/export/excel", methods=["GET", "POST"])
 def export_excel():
     if not login_requerido():
         return redirect(url_for("login"))
@@ -4588,36 +4596,64 @@ def export_excel():
     if not grupo_id:
         return redirect(url_for("grupos"))
 
+    download_scope = (request.values.get("scope") or "all").strip().lower()
+    selected_boxes_raw = (request.values.get("selected_boxes") or "").strip()
+    selected_box_ids = []
+    if download_scope == "boxes" and selected_boxes_raw:
+        for item in selected_boxes_raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                selected_box_ids.append(int(item))
+            except ValueError:
+                continue
+        selected_box_ids = sorted(set(box_id for box_id in selected_box_ids if box_id > 0))
+
+    if download_scope == "boxes" and not selected_box_ids:
+        flash("Selecciona al menos una caja para descargar el Excel.", "error")
+        return redirect(url_for("archivo"))
+
     conn = get_db()
     cur = conn.cursor()
 
-    # ===== 1) HOJA CAJAS (sin ID real, usando caja_visible) =====
+    caja_filter_sql = ""
+    caja_filter_params = ()
+    if selected_box_ids:
+        in_clause, in_params = sqlserver_in_clause(selected_box_ids)
+        caja_filter_sql = f" AND c.id IN {in_clause}"
+        caja_filter_params = tuple(in_params)
+
+    # ===== 1) HOJA CAJAS =====
     cur.execute("""
         WITH ranked AS (
             SELECT id, rango_min, rango_max,
                    ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
             FROM cajas
             WHERE grupo_id = %s AND is_pendiente = FALSE
+        ),
+        conteo AS (
+            SELECT caja_id, COUNT(*) AS total_archivos
+            FROM archivos
+            WHERE grupo_id = %s
+            GROUP BY caja_id
         )
         SELECT
-            r.caja_visible AS caja_num,
-            r.rango_min,
-            r.rango_max,
-            COALESCE(COUNT(a.id),0) AS total_archivos
-        FROM ranked r
-        LEFT JOIN archivos a ON a.caja_id = r.id AND a.grupo_id = %s
-        GROUP BY r.caja_visible, r.rango_min, r.rango_max
-        ORDER BY r.caja_visible
-    """, (grupo_id, grupo_id))
+            c.id,
+            CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
+            c.rango_min,
+            c.rango_max,
+            COALESCE(ct.total_archivos, 0) AS total_archivos,
+            c.is_pendiente
+        FROM cajas c
+        LEFT JOIN ranked r ON r.id = c.id
+        LEFT JOIN conteo ct ON ct.caja_id = c.id
+        WHERE c.grupo_id = %s
+          AND (c.is_pendiente = FALSE OR COALESCE(ct.total_archivos, 0) > 0)
+    """ + caja_filter_sql + """
+        ORDER BY CASE WHEN c.is_pendiente = 1 THEN 1 ELSE 0 END, c.rango_min, c.id
+    """, (grupo_id, grupo_id, grupo_id, *caja_filter_params))
     cajas = cur.fetchall()
-
-    # Caja pendiente (solo si tiene archivos)
-    pendiente_id = asegurar_caja_sin_asignar(grupo_id)
-    cur.execute(
-        "SELECT COUNT(*) FROM archivos WHERE caja_id = %s AND grupo_id = %s",
-        (pendiente_id, grupo_id)
-    )
-    total_caja0 = cur.fetchone()[0]
 
     # ===== 2) HOJA ARCHIVOS (caja_visible, documento, nombre, pdf si/no) =====
     cur.execute("""
@@ -4635,8 +4671,10 @@ def export_excel():
         JOIN cajas c ON c.id = a.caja_id
         LEFT JOIN ranked r ON r.id = c.id
         WHERE a.grupo_id = %s
+          AND c.grupo_id = %s
+    """ + (f"      AND a.caja_id IN {in_clause}\n" if selected_box_ids else "") + """
         ORDER BY caja_num, a.numero
-    """, (grupo_id, grupo_id))
+    """, (grupo_id, grupo_id, grupo_id, *caja_filter_params))
     archivos = cur.fetchall()
 
     cur.close()
@@ -4650,12 +4688,9 @@ def export_excel():
     ws1.title = "Cajas"
     ws1.append(["Caja", "Rango", "Total de archivos"])
 
-    for (caja_num, rmin, rmax, total) in cajas:
-        ws1.append([caja_num, f"{rmin}-{rmax}", total])
-
-    if total_caja0 and total_caja0 > 0:
-        # Caja 0 al final, sin rango
-        ws1.append([0, "", total_caja0])
+    for (_, caja_num, rmin, rmax, total, is_pendiente) in cajas:
+        rango = "" if is_pendiente else f"{rmin}-{rmax}"
+        ws1.append([caja_num, rango, total])
 
     # ---- Hoja 2: Archivos (en bloques por caja) ----
     ws2 = wb.create_sheet("Archivos")
@@ -4719,7 +4754,7 @@ def export_excel():
     return send_file(
         output,
         as_attachment=True,
-        download_name="reporte_archivo.xlsx",
+        download_name="reporte_archivo.xlsx" if not selected_box_ids else "reporte_archivo_por_cajas.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 

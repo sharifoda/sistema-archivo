@@ -590,7 +590,7 @@
     <button class="btn" type="button" onclick="toggleExcelMenu(event)">Excel</button>
     <div class="excel-menu-panel">
       <button class="btn excel-menu-item" type="button" onclick="seleccionarExcel()">Subir archivo</button>
-      <a class="btn excel-menu-item" href="{{ url_for('export_excel') }}">Descargar archivo</a>
+      <button class="btn excel-menu-item" type="button" onclick="abrirDescargaExcel()">Descargar archivo</button>
     </div>
   </div>
   <div class="pdf-bulk-menu" id="pdfBulkMenu">
@@ -610,11 +610,51 @@
   <input type="hidden" name="accion" value="importar_excel">
   <input type="file" name="excel" id="excelFileInput" accept=".xlsx,.xls">
 </form>
+<form id="excelDownloadForm" method="post" action="{{ url_for('export_excel') }}" style="display:none;">
+  <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+  <input type="hidden" name="scope" id="excelDownloadScope" value="all">
+  <input type="hidden" name="selected_boxes" id="excelSelectedBoxes" value="">
+</form>
 <form id="pdfBulkUploadForm" method="post" enctype="multipart/form-data" style="display:none;">
   <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
   <input type="hidden" name="accion" value="carga_masiva_pdf">
   <input type="file" name="pdfs" id="pdfBulkFileInput" accept="application/pdf,.pdf" multiple>
 </form>
+
+<div class="modal-overlay" id="overlayExcelDownload"></div>
+<div class="modal" id="modalExcelDownload" style="width:min(880px,94vw);">
+  <h3>Descarga de Excel</h3>
+  <p style="margin:6px 0 14px; color:#5a6a7f;">Elige si quieres descargar todo el archivo o únicamente algunas cajas.</p>
+
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+    <button type="button" class="btn" id="excelModeAllBtn" onclick="setExcelDownloadMode('all')">Descargar todo</button>
+    <button type="button" class="btn" id="excelModeBoxesBtn" onclick="setExcelDownloadMode('boxes')">Descargar por cajas</button>
+  </div>
+
+  <div id="excelDownloadBoxesSection" style="display:none;">
+    <div class="bulk-download-layout">
+      <div class="bulk-boxes" id="excelBoxesList"></div>
+      <div class="bulk-docs">
+        <div class="bulk-docs-header">
+          <div>
+            <strong>Selección de cajas</strong>
+            <div class="bulk-summary" id="excelBoxesSummary">Marca las cajas que quieres incluir en el Excel.</div>
+          </div>
+          <div class="bulk-doc-actions">
+            <button type="button" class="btn" onclick="seleccionarTodasLasCajasExcel()">Seleccionar todas</button>
+            <button type="button" class="btn" onclick="limpiarCajasExcel()">Limpiar</button>
+          </div>
+        </div>
+        <div class="bulk-doc-list" id="excelBoxesSelectedList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn" onclick="cerrarModal('ExcelDownload')">Cerrar</button>
+    <button type="button" class="btn" onclick="descargarExcelSeleccionado()">Descargar</button>
+  </div>
+</div>
 
 <div class="modal-overlay" id="overlayPdfDownload"></div>
 <div class="modal" id="modalPdfDownload" style="width:min(920px,94vw);">
@@ -818,6 +858,7 @@
        "importJob": import_job,
        "resultado":   resultado,
        "csrfToken":   csrf_token(),
+       "excelBoxData": excel_box_data,
        "pdfBulkData": pdf_bulk_data
      } | tojson }}'>
 </div>
@@ -853,6 +894,15 @@ function seleccionarPdfMasivos() {
   const input = document.getElementById("pdfBulkFileInput");
   if (menu) menu.classList.remove("open");
   if (input) input.click();
+}
+
+function abrirDescargaExcel() {
+  const menu = document.getElementById("excelMenu");
+  if (menu) menu.classList.remove("open");
+  if (typeof window.prepareExcelDownloadModal === "function") {
+    window.prepareExcelDownloadModal();
+  }
+  abrirModal("ExcelDownload");
 }
 
 function abrirDescargaMasivaPdf() {

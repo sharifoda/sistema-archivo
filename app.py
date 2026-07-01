@@ -3472,7 +3472,7 @@ def archivo():
 
         # ---------- Modificar Archivo (desde modal de bÃºsqueda) ----------
         elif accion == "mandar_reescaneo_archivo_modal":
-            numero = int(request.form["numero"])
+            numero = int(request.form.get("numero") or request.form["numero_old"])
             motivo = (request.form.get("motivo") or "").strip()
 
             conn = get_db()
@@ -4141,7 +4141,7 @@ def archivo_caja(caja_id):
             return redirect(url_for("archivo_caja", caja_id=caja_id))
 
         if accion == "mandar_reescaneo_archivo_fila":
-            numero = int(request.form["numero"])
+            numero = int(request.form.get("numero") or request.form["numero_old"])
             motivo = (request.form.get("motivo") or "").strip()
 
             conn = get_db()

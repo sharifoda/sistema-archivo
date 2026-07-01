@@ -270,7 +270,7 @@
 
   <form method="post" enctype="multipart/form-data">
     <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
-    <input type="hidden" name="accion" value="modificar_archivo_fila">
+    <input type="hidden" name="accion" value="modificar_archivo_fila" id="archivo_accion_modal">
 
     <input type="hidden" name="numero_old" id="numero_old">
 
@@ -292,6 +292,9 @@
     <!-- 📄 NUEVO: subir PDF -->
     <label>PDF (opcional)</label>
     <input type="file" name="pdf" accept="application/pdf">
+
+    <label style="display:block; margin-top:14px;">Motivo de reescaneo (opcional)</label>
+    <input type="text" name="motivo" id="archivo_motivo_reescaneo" placeholder="Ej. faltan hojas, escaneo incompleto">
 
     <div class="pdf-options-block" id="archivoPdfOptions">
       <p class="pdf-options-title">Opciones del PDF</p>
@@ -316,7 +319,10 @@
 
     <div class="actions">
       <button class="btn" type="button" onclick="cerrarModalArchivo()">Cancelar</button>
-      <button class="btn" type="submit">Modificar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+        <button class="btn btn-danger btn-wide" type="submit" onclick="return prepararAccionArchivoModal('mandar_reescaneo_archivo_fila')">Mandar a reescaneo</button>
+        <button class="btn" type="submit" onclick="return prepararAccionArchivoModal('modificar_archivo_fila')">Modificar</button>
+      </div>
     </div>
   </form>
 </div>
@@ -397,6 +403,14 @@
     if (removeInput) {
       removeInput.checked = false;
     }
+    const accionInput = document.getElementById("archivo_accion_modal");
+    const motivoInput = document.getElementById("archivo_motivo_reescaneo");
+    if (accionInput) {
+      accionInput.value = "modificar_archivo_fila";
+    }
+    if (motivoInput) {
+      motivoInput.value = "";
+    }
 
     document.getElementById("overlayArchivo").style.display = "block";
     document.getElementById("modalArchivo").style.display = "block";
@@ -407,6 +421,14 @@
     document.getElementById("overlayArchivo").style.display = "none";
     document.getElementById("modalArchivo").style.display = "none";
     document.body.classList.remove("modal-open");
+  }
+
+  function prepararAccionArchivoModal(accion){
+    const input = document.getElementById("archivo_accion_modal");
+    if (input) {
+      input.value = accion;
+    }
+    return true;
   }
 
   // Cerrar al hacer clic en overlay

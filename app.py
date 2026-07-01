@@ -45,6 +45,8 @@ import threading
 import uuid
 import re
 import zipfile
+import shutil
+import time
 from werkzeug.exceptions import HTTPException
 try:
     from PyPDF2 import PdfReader, PdfWriter
@@ -75,6 +77,7 @@ APP_TIMEZONE = ZoneInfo("America/Bogota")
 IMPORT_JOBS = {}
 IMPORT_JOBS_LOCK = threading.Lock()
 IMPORT_REPORTS_TABLE_READY = False
+RESCANS_TABLE_READY = False
 
 
 def flash_error(code, fallback=None, detail=None):
@@ -135,6 +138,102 @@ def ensure_import_reports_table():
     cur.close()
     conn.close()
     IMPORT_REPORTS_TABLE_READY = True
+
+
+def ensure_rescans_table():
+    global RESCANS_TABLE_READY
+    if RESCANS_TABLE_READY:
+        return
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        IF OBJECT_ID('dbo.reescaneos', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.reescaneos (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                archivo_id INT NOT NULL,
+                empresa INT NOT NULL,
+                numero_documento BIGINT NULL,
+                nombre_documento NVARCHAR(255) NULL,
+                tipo_doc NVARCHAR(10) NULL,
+                estado NVARCHAR(20) NOT NULL CONSTRAINT DF_reescaneos_estado DEFAULT ('pendiente'),
+                motivo NVARCHAR(500) NULL,
+                solicitado_por INT NULL,
+                cerrado_por INT NULL,
+                fecha_solicitud DATETIME2 NOT NULL CONSTRAINT DF_reescaneos_fecha_solicitud DEFAULT (SYSDATETIME()),
+                fecha_cierre DATETIME2 NULL
+            );
+        END
+
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE name = 'IX_reescaneos_empresa_estado_fecha'
+              AND object_id = OBJECT_ID('dbo.reescaneos')
+        )
+        BEGIN
+            CREATE INDEX IX_reescaneos_empresa_estado_fecha
+            ON dbo.reescaneos (empresa, estado, fecha_solicitud DESC);
+        END
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    RESCANS_TABLE_READY = True
+
+
+def crear_reescaneo_pendiente(archivo_id, grupo_id, numero_documento, nombre_documento, tipo_doc, solicitado_por, motivo=""):
+    ensure_rescans_table()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT TOP 1 id
+        FROM reescaneos
+        WHERE archivo_id = %s
+          AND grupo_id = %s
+          AND estado = 'pendiente'
+        ORDER BY fecha_solicitud DESC
+        """,
+        (archivo_id, grupo_id)
+    )
+    existente = cur.fetchone()
+    if existente:
+        cur.execute(
+            """
+            UPDATE reescaneos
+            SET motivo = %s,
+                solicitado_por = %s,
+                fecha_solicitud = SYSDATETIME(),
+                numero_documento = %s,
+                nombre_documento = %s,
+                tipo_doc = %s
+            WHERE id = %s
+            """,
+            (motivo or None, solicitado_por, numero_documento, nombre_documento, tipo_doc, existente[0])
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return existente[0], False
+
+    cur.execute(
+        """
+        INSERT INTO reescaneos (
+            archivo_id, grupo_id, numero_documento, nombre_documento, tipo_doc,
+            estado, motivo, solicitado_por, fecha_solicitud
+        )
+        VALUES (%s, %s, %s, %s, %s, 'pendiente', %s, %s, SYSDATETIME())
+        RETURNING id
+        """,
+        (archivo_id, grupo_id, numero_documento, nombre_documento, tipo_doc, motivo or None, solicitado_por)
+    )
+    reescaneo_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return reescaneo_id, True
 
 
 def _json_loads_safe(value, default):
@@ -539,6 +638,169 @@ def informes():
         selected_group_name=selected_group_name,
         group_options=group_options,
         import_report_url_base=url_for("importacion_reporte", job_id="__JOB__"),
+    )
+
+
+@app.route("/reescaneos", methods=["GET", "POST"])
+def reescaneos():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    ensure_rescans_table()
+
+    if request.method == "POST":
+        accion = (request.form.get("accion") or "").strip()
+        reescaneo_id_raw = (request.form.get("reescaneo_id") or "").strip()
+        if not reescaneo_id_raw.isdigit():
+            flash_error(400)
+            return redirect(url_for("reescaneos"))
+        reescaneo_id = int(reescaneo_id_raw)
+
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, archivo_id, numero_documento, nombre_documento, estado
+            FROM reescaneos
+            WHERE id = %s AND grupo_id = %s
+            """,
+            (reescaneo_id, grupo_id)
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            conn.close()
+            flash_error(404)
+            return redirect(url_for("reescaneos"))
+
+        _, archivo_id, numero_documento, nombre_documento, estado_actual = row
+        if estado_actual != "pendiente":
+            cur.close()
+            conn.close()
+            flash("La solicitud de reescaneo ya no está pendiente.", "info")
+            return redirect(url_for("reescaneos"))
+
+        nuevo_estado = None
+        mensaje = None
+        accion_log = None
+        if accion == "completar_reescaneo":
+            nuevo_estado = "completado"
+            mensaje = "Documento marcado como reescaneado."
+            accion_log = "COMPLETAR_REESCANEO"
+        elif accion == "cancelar_reescaneo":
+            nuevo_estado = "cancelado"
+            mensaje = "Solicitud de reescaneo cancelada."
+            accion_log = "CANCELAR_REESCANEO"
+
+        if not nuevo_estado:
+            cur.close()
+            conn.close()
+            flash_error(400)
+            return redirect(url_for("reescaneos"))
+
+        cur.execute(
+            """
+            UPDATE reescaneos
+            SET estado = %s,
+                cerrado_por = %s,
+                fecha_cierre = SYSDATETIME()
+            WHERE id = %s AND grupo_id = %s
+            """,
+            (nuevo_estado, session.get("usuario_id"), reescaneo_id, grupo_id)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        registrar_log(
+            session.get("usuario_id"),
+            f"{accion_log} archivo_id={archivo_id} numero={numero_documento}",
+            request.remote_addr,
+            grupo_id
+        )
+        registrar_movimiento(
+            session.get("usuario_id"),
+            grupo_id,
+            entidad="reescaneo",
+            entidad_id=reescaneo_id,
+            accion=accion_log,
+            datos_despues={
+                "archivo_id": archivo_id,
+                "numero": numero_documento,
+                "nombre": nombre_documento,
+                "estado": nuevo_estado,
+            },
+        )
+        flash(mensaje, "success")
+        return redirect(url_for("reescaneos"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        WITH ranked AS (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+            FROM cajas
+            WHERE grupo_id = %s AND is_pendiente = FALSE
+        )
+        SELECT
+            r.id,
+            r.archivo_id,
+            c.id AS caja_id,
+            COALESCE(a.numero, r.numero_documento) AS numero,
+            COALESCE(a.nombre, r.nombre_documento) AS nombre,
+            COALESCE(a.tipo_doc, r.tipo_doc) AS tipo_doc,
+            CASE
+                WHEN c.id IS NULL THEN NULL
+                WHEN c.is_pendiente = 1 THEN 0
+                ELSE rk.caja_visible
+            END AS caja_num,
+            r.motivo,
+            r.fecha_solicitud,
+            u.usuario,
+            CASE WHEN a.id IS NULL THEN 1 ELSE 0 END AS archivo_eliminado
+        FROM reescaneos r
+        LEFT JOIN archivos a ON a.id = r.archivo_id AND a.grupo_id = r.grupo_id
+        LEFT JOIN cajas c ON c.id = a.caja_id AND c.grupo_id = r.grupo_id
+        LEFT JOIN ranked rk ON rk.id = c.id
+        LEFT JOIN usuarios u ON u.id = r.solicitado_por
+        WHERE r.grupo_id = %s
+          AND r.estado = 'pendiente'
+        ORDER BY r.fecha_solicitud DESC, numero
+        """,
+        (grupo_id, grupo_id)
+    )
+    pendientes = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT TOP 20
+            r.id,
+            r.numero_documento,
+            r.nombre_documento,
+            r.tipo_doc,
+            r.estado,
+            r.fecha_solicitud,
+            r.fecha_cierre
+        FROM reescaneos r
+        WHERE r.grupo_id = %s
+          AND r.estado IN ('completado', 'cancelado')
+        ORDER BY COALESCE(r.fecha_cierre, r.fecha_solicitud) DESC
+        """,
+        (grupo_id,)
+    )
+    historial = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "reescaneos.html",
+        pendientes=pendientes,
+        historial=historial,
     )
 
 def normalizar_nombre(nombre):
@@ -1325,6 +1587,19 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             cur.execute(
                 "UPDATE archivos SET pdf_path = %s WHERE id = %s AND grupo_id = %s",
                 (pdf_name, archivo_id, grupo_id)
+            )
+            ensure_rescans_table()
+            cur.execute(
+                """
+                UPDATE reescaneos
+                SET estado = 'completado',
+                    cerrado_por = %s,
+                    fecha_cierre = SYSDATETIME()
+                WHERE archivo_id = %s
+                  AND grupo_id = %s
+                  AND estado = 'pendiente'
+                """,
+                (usuario_id, archivo_id, grupo_id)
             )
 
             if index % 25 == 0:
@@ -2788,6 +3063,7 @@ def archivo():
 
         # ---------- Carga masiva PDF ----------
         if accion == "carga_masiva_pdf":
+            prep_started_at = time.perf_counter()
             pdf_files = request.files.getlist("pdfs")
             pdf_files = [f for f in pdf_files if f and f.filename]
             if not pdf_files:
@@ -2817,17 +3093,53 @@ def archivo():
             uploads_dir = os.path.join(app.root_path, "uploads", "imports_pdf", uuid.uuid4().hex)
             os.makedirs(uploads_dir, exist_ok=True)
             stored_names = []
-            for index, file in enumerate(pdf_files, start=1):
-                original_name = os.path.basename(file.filename or f"pdf_{index}.pdf")
-                safe_name = secure_filename(original_name) or f"pdf_{index}.pdf"
-                final_name = f"{index:04d}_{safe_name}"
-                file.stream.seek(0)
-                file.save(os.path.join(uploads_dir, final_name))
-                stored_names.append(final_name)
+            app.logger.info(
+                "Preparando carga masiva PDF grupo=%s usuario=%s archivos=%s mb=%.2f content_length=%s",
+                grupo_id,
+                session.get("usuario_id"),
+                len(pdf_files),
+                total_bytes / (1024 * 1024),
+                request.content_length,
+            )
+            try:
+                for index, file in enumerate(pdf_files, start=1):
+                    original_name = os.path.basename(file.filename or f"pdf_{index}.pdf")
+                    safe_name = secure_filename(original_name) or f"pdf_{index}.pdf"
+                    final_name = f"{index:04d}_{safe_name}"
+                    file.stream.seek(0)
+                    file.save(os.path.join(uploads_dir, final_name))
+                    stored_names.append(final_name)
+                    if index % 50 == 0 or index == len(pdf_files):
+                        app.logger.info(
+                            "Carga masiva PDF temporal grupo=%s progreso=%s/%s",
+                            grupo_id,
+                            index,
+                            len(pdf_files),
+                        )
+            except Exception:
+                shutil.rmtree(uploads_dir, ignore_errors=True)
+                app.logger.exception(
+                    "Fallo preparando carga masiva PDF grupo=%s usuario=%s archivos=%s",
+                    grupo_id,
+                    session.get("usuario_id"),
+                    len(pdf_files),
+                )
+                flash_error(904, fallback="No se pudieron preparar los PDFs para la carga masiva.")
+                return redirect(url_for("archivo"))
 
             job_id = uuid.uuid4().hex
             group_name = get_group_name(grupo_id)
             session["last_import_job_id"] = job_id
+            prep_elapsed = time.perf_counter() - prep_started_at
+            app.logger.info(
+                "Carga masiva PDF preparada job=%s grupo=%s usuario=%s archivos=%s mb=%.2f segundos=%.2f",
+                job_id,
+                grupo_id,
+                session.get("usuario_id"),
+                len(pdf_files),
+                total_bytes / (1024 * 1024),
+                prep_elapsed,
+            )
             set_import_job(
                 job_id,
                 import_type="pdf",
@@ -3101,6 +3413,19 @@ def archivo():
 
             if antes:
                 archivo_id, caja_old, numero_old, nombre_old, pdf_old, tipo_doc_old = antes
+                ensure_rescans_table()
+                cur.execute(
+                    """
+                    UPDATE reescaneos
+                    SET estado = 'cancelado',
+                        cerrado_por = %s,
+                        fecha_cierre = SYSDATETIME()
+                    WHERE archivo_id = %s
+                      AND grupo_id = %s
+                      AND estado = 'pendiente'
+                    """,
+                    (session.get("usuario_id"), archivo_id, grupo_id)
+                )
                 registrar_movimiento(
                     session.get("usuario_id"),
                     grupo_id,
@@ -3146,6 +3471,62 @@ def archivo():
             return redirect(url_for("archivo"))
 
         # ---------- Modificar Archivo (desde modal de bÃºsqueda) ----------
+        elif accion == "mandar_reescaneo_archivo_modal":
+            numero = int(request.form["numero"])
+            motivo = (request.form.get("motivo") or "").strip()
+
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, numero, nombre, tipo_doc FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero, grupo_id)
+            )
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if not row:
+                flash_error(404)
+                return redirect(url_for("archivo"))
+
+            archivo_id, numero_doc, nombre_doc, tipo_doc = row
+            reescaneo_id, created = crear_reescaneo_pendiente(
+                archivo_id,
+                grupo_id,
+                numero_doc,
+                nombre_doc,
+                tipo_doc,
+                session.get("usuario_id"),
+                motivo
+            )
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"MANDAR_REESCANEO archivo_id={archivo_id} numero={numero_doc}",
+                request.remote_addr,
+                grupo_id
+            )
+            registrar_movimiento(
+                session.get("usuario_id"),
+                grupo_id,
+                entidad="reescaneo",
+                entidad_id=reescaneo_id,
+                accion="CREAR_REESCANEO",
+                datos_despues={
+                    "archivo_id": archivo_id,
+                    "numero": numero_doc,
+                    "nombre": nombre_doc,
+                    "motivo": motivo,
+                    "nuevo": created,
+                },
+            )
+
+            flash(
+                "Documento enviado a reescaneo." if created else "El documento ya estaba pendiente de reescaneo. Se actualizó la solicitud.",
+                "success" if created else "info"
+            )
+            return redirect(url_for("archivo"))
+
         elif accion == "modificar_archivo_modal":
             numero_old = int(request.form["numero_old"])
             numero_new = int(request.form["numero_new"])
@@ -3243,6 +3624,21 @@ def archivo():
                 SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s, tipo_doc = %s
                 WHERE numero = %s AND grupo_id = %s
             """, (numero_new, nombre_new, caja_dest_id, pdf_name, tipo_doc_new, numero_old, grupo_id))
+
+            if file and file.filename:
+                ensure_rescans_table()
+                cur.execute(
+                    """
+                    UPDATE reescaneos
+                    SET estado = 'completado',
+                        cerrado_por = %s,
+                        fecha_cierre = SYSDATETIME()
+                    WHERE archivo_id = %s
+                      AND grupo_id = %s
+                      AND estado = 'pendiente'
+                    """,
+                    (session.get("usuario_id"), archivo_id, grupo_id)
+                )
 
             conn.commit()
             cur.close()
@@ -3606,12 +4002,30 @@ def archivo_caja(caja_id):
 
             total_archivos = len(archivos_caja)
             pdfs = []
+            archivo_ids_caja = []
             for _, _, pdf_path in archivos_caja:
                 if pdf_path:
                     abs_path = pdf_path
                     if not os.path.isabs(abs_path):
                         abs_path = os.path.join(app.config["UPLOAD_FOLDER"], pdf_path)
                     pdfs.append(abs_path)
+            archivo_ids_caja = [row[0] for row in archivos_caja]
+
+            if archivo_ids_caja:
+                ensure_rescans_table()
+                in_clause, in_params = sqlserver_in_clause(archivo_ids_caja)
+                cur.execute(
+                    f"""
+                    UPDATE reescaneos
+                    SET estado = 'cancelado',
+                        cerrado_por = %s,
+                        fecha_cierre = SYSDATETIME()
+                    WHERE archivo_id IN {in_clause}
+                      AND grupo_id = %s
+                      AND estado = 'pendiente'
+                    """,
+                    (session.get("usuario_id"), *in_params, grupo_id)
+                )
 
             cur.execute(
                 "DELETE FROM archivos WHERE caja_id = %s AND grupo_id = %s",
@@ -3680,6 +4094,19 @@ def archivo_caja(caja_id):
 
             if antes:
                 archivo_id, caja_old, numero_old, nombre_old, pdf_old, tipo_doc_old = antes
+                ensure_rescans_table()
+                cur.execute(
+                    """
+                    UPDATE reescaneos
+                    SET estado = 'cancelado',
+                        cerrado_por = %s,
+                        fecha_cierre = SYSDATETIME()
+                    WHERE archivo_id = %s
+                      AND grupo_id = %s
+                      AND estado = 'pendiente'
+                    """,
+                    (session.get("usuario_id"), archivo_id, grupo_id)
+                )
                 registrar_movimiento(
                     session.get("usuario_id"),
                     grupo_id,
@@ -3711,6 +4138,62 @@ def archivo_caja(caja_id):
                 )
 
             flash("Archivo eliminado correctamente.", "success")
+            return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+        if accion == "mandar_reescaneo_archivo_fila":
+            numero = int(request.form["numero"])
+            motivo = (request.form.get("motivo") or "").strip()
+
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, numero, nombre, tipo_doc FROM archivos WHERE numero = %s AND grupo_id = %s",
+                (numero, grupo_id)
+            )
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if not row:
+                flash_error(404)
+                return redirect(url_for("archivo_caja", caja_id=caja_id))
+
+            archivo_id, numero_doc, nombre_doc, tipo_doc = row
+            reescaneo_id, created = crear_reescaneo_pendiente(
+                archivo_id,
+                grupo_id,
+                numero_doc,
+                nombre_doc,
+                tipo_doc,
+                session.get("usuario_id"),
+                motivo
+            )
+
+            registrar_log(
+                session.get("usuario_id"),
+                f"MANDAR_REESCANEO archivo_id={archivo_id} numero={numero_doc}",
+                request.remote_addr,
+                grupo_id
+            )
+            registrar_movimiento(
+                session.get("usuario_id"),
+                grupo_id,
+                entidad="reescaneo",
+                entidad_id=reescaneo_id,
+                accion="CREAR_REESCANEO",
+                datos_despues={
+                    "archivo_id": archivo_id,
+                    "numero": numero_doc,
+                    "nombre": nombre_doc,
+                    "motivo": motivo,
+                    "nuevo": created,
+                },
+            )
+
+            flash(
+                "Documento enviado a reescaneo." if created else "El documento ya estaba pendiente de reescaneo. Se actualizó la solicitud.",
+                "success" if created else "info"
+            )
             return redirect(url_for("archivo_caja", caja_id=caja_id))
 
         # ---------- MODIFICAR ARCHIVO (numero y/o nombre) ----------
@@ -3801,6 +4284,21 @@ def archivo_caja(caja_id):
                     tipo_doc = %s
                 WHERE numero = %s AND grupo_id = %s
             """, (numero_new, nombre_new, pdf_name, tipo_doc_new, numero_old, grupo_id))
+
+            if file and file.filename:
+                ensure_rescans_table()
+                cur.execute(
+                    """
+                    UPDATE reescaneos
+                    SET estado = 'completado',
+                        cerrado_por = %s,
+                        fecha_cierre = SYSDATETIME()
+                    WHERE archivo_id = %s
+                      AND grupo_id = %s
+                      AND estado = 'pendiente'
+                    """,
+                    (session.get("usuario_id"), archivo_id, grupo_id)
+                )
 
             conn.commit()
             cur.close()

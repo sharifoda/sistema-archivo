@@ -517,6 +517,14 @@ function abrirModalEditarDesdeBusqueda(doc, nombre, cajaNum, cajaId, tipoDoc) {
   if (removeInput) {
     removeInput.checked = false;
   }
+  const accionInput = document.getElementById("editar_accion");
+  const motivoInput = document.getElementById("editar_motivo_reescaneo");
+  if (accionInput) {
+    accionInput.value = "modificar_archivo_modal";
+  }
+  if (motivoInput) {
+    motivoInput.value = "";
+  }
 
   document.getElementById("editarInfo").innerText =
     "Editando documento: " +

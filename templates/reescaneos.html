@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Reescaneo{% endblock %}
+{% block content %}
+<style>
+  .reescaneo-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+    margin-bottom:18px;
+  }
+  .reescaneo-copy p{
+    margin:6px 0 0;
+    color:var(--muted);
+  }
+  .reescaneo-grid{
+    display:grid;
+    gap:18px;
+  }
+  .reescaneo-card{
+    padding:20px;
+    border:1px solid rgba(17, 197, 217, 0.16);
+    border-radius:20px;
+    background:rgba(255,255,255,0.88);
+    box-shadow:var(--shadow-soft);
+  }
+  .reescaneo-card h3{
+    margin:0 0 12px;
+    color:var(--primary);
+  }
+  .reescaneo-meta{
+    color:var(--muted);
+    font-size:13px;
+  }
+  .reescaneo-table{
+    width:100%;
+    border-collapse:collapse;
+  }
+  .reescaneo-table th,
+  .reescaneo-table td{
+    padding:12px 10px;
+    border-top:1px solid var(--line);
+    text-align:left;
+    vertical-align:top;
+  }
+  .reescaneo-table th{
+    color:var(--primary);
+    font-size:13px;
+  }
+  .reescaneo-actions{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    background:var(--surface-soft);
+    color:var(--primary);
+    font-size:12px;
+    font-weight:700;
+  }
+</style>
+
+<div class="reescaneo-header">
+  <div class="reescaneo-copy">
+    <h2 style="margin:0;">Reescaneo</h2>
+    <p>Lista de documentos marcados para volver a escanear.</p>
+  </div>
+</div>
+
+<div class="reescaneo-grid">
+  <section class="reescaneo-card">
+    <h3>Pendientes</h3>
+    {% if pendientes %}
+    <table class="reescaneo-table">
+      <tr>
+        <th>Documento</th>
+        <th>Nombre</th>
+        <th>Detalle</th>
+        <th>Solicitud</th>
+        <th>Acciones</th>
+      </tr>
+      {% for item in pendientes %}
+      <tr>
+        <td>
+          <strong>{{ item[3]|puntos }}</strong><br>
+          <span class="reescaneo-meta">{{ item[5] or '' }}</span>
+        </td>
+        <td>
+          {{ (item[4] or '')|upper }}
+          {% if item[10] %}
+          <div class="reescaneo-meta" style="color:var(--danger);">El documento ya no existe en el archivo.</div>
+          {% endif %}
+        </td>
+        <td>
+          <div class="reescaneo-meta">
+            Caja:
+            {% if item[6] is none %}
+              N/D
+            {% elif item[6] == 0 %}
+              0 - Pendiente
+            {% else %}
+              {{ item[6] }}
+            {% endif %}
+          </div>
+          <div class="reescaneo-meta">Motivo: {{ item[7] or 'Sin motivo registrado' }}</div>
+        </td>
+        <td>
+          <div>{{ item[8]|hora_colombia }}</div>
+          <div class="reescaneo-meta">Solicitó: {{ item[9] or 'N/D' }}</div>
+        </td>
+        <td>
+          <div class="reescaneo-actions">
+            <form method="post" style="margin:0;">
+              <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+              <input type="hidden" name="accion" value="completar_reescaneo">
+              <input type="hidden" name="reescaneo_id" value="{{ item[0] }}">
+              <button type="submit" class="btn">Completar</button>
+            </form>
+            <form method="post" style="margin:0;">
+              <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+              <input type="hidden" name="accion" value="cancelar_reescaneo">
+              <input type="hidden" name="reescaneo_id" value="{{ item[0] }}">
+              <button type="submit" class="btn btn-danger">Cancelar</button>
+            </form>
+            {% if not item[10] and item[2] %}
+            <a class="btn" href="{{ url_for('archivo_caja', caja_id=item[2]) }}?highlight={{ item[3] }}">Ir al documento</a>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="reescaneo-meta">No hay documentos pendientes de reescaneo.</p>
+    {% endif %}
+  </section>
+
+  <section class="reescaneo-card">
+    <h3>Historial reciente</h3>
+    {% if historial %}
+    <table class="reescaneo-table">
+      <tr>
+        <th>Documento</th>
+        <th>Nombre</th>
+        <th>Estado</th>
+        <th>Fechas</th>
+      </tr>
+      {% for item in historial %}
+      <tr>
+        <td>
+          <strong>{{ item[1]|puntos }}</strong><br>
+          <span class="reescaneo-meta">{{ item[3] or '' }}</span>
+        </td>
+        <td>{{ (item[2] or '')|upper }}</td>
+        <td>
+          <span class="pill">{{ item[4]|upper }}</span>
+        </td>
+        <td>
+          <div>Solicitud: {{ item[5]|hora_colombia }}</div>
+          <div class="reescaneo-meta">Cierre: {{ item[6]|hora_colombia if item[6] else 'N/D' }}</div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="reescaneo-meta">Todavía no hay historial de reescaneo.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

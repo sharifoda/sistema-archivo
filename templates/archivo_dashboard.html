@@ -796,7 +796,7 @@
 
   <form method="post" enctype="multipart/form-data">
     <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
-    <input type="hidden" name="accion" value="modificar_archivo_modal">
+    <input type="hidden" name="accion" value="modificar_archivo_modal" id="editar_accion">
     <input type="hidden" name="numero_old" id="numero_old">
 
     <label>Documento (nuevo)</label><br>
@@ -816,6 +816,9 @@
 
     <label>PDF (opcional)</label><br>
     <input type="file" name="pdf" accept="application/pdf"><br>
+
+    <label style="display:block; margin-top:14px;">Motivo de reescaneo (opcional)</label><br>
+    <input type="text" name="motivo" id="editar_motivo_reescaneo" placeholder="Ej. faltan hojas, historia incompleta"><br>
 
     <div class="pdf-options-block" id="editarPdfOptions">
       <p class="pdf-options-title">Opciones del PDF</p>
@@ -840,7 +843,10 @@
 
     <div class="actions">
       <button type="button" class="btn" onclick="cerrarModal('Editar')">Cancelar</button>
-      <button type="submit" class="btn">Modificar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+        <button type="submit" class="btn btn-danger" onclick="return prepararAccionEditarModal('mandar_reescaneo_archivo_modal')">Mandar a reescaneo</button>
+        <button type="submit" class="btn" onclick="return prepararAccionEditarModal('modificar_archivo_modal')">Modificar</button>
+      </div>
     </div>
   </form>
 </div>
@@ -912,6 +918,12 @@ function abrirDescargaMasivaPdf() {
     window.renderBulkPdfBoxes();
   }
   abrirModal("PdfDownload");
+}
+
+function prepararAccionEditarModal(accion) {
+  const input = document.getElementById("editar_accion");
+  if (input) input.value = accion;
+  return true;
 }
 
 document.addEventListener("click", function (event) {

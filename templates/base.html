@@ -35,6 +35,7 @@
         <a href="{{ url_for('inicio') }}">Inicio</a>
         <a href="{{ url_for('archivo') }}">Archivo</a>
         <a href="{{ url_for('informes') }}">Informes</a>
+        <a href="{{ url_for('reescaneos') }}">Reescaneo</a>
         {% if session.get("rol") in ["admin", "supervisor"] %}
           {% if session.get("rol") == "supervisor" %}
             <a href="{{ url_for('grupos') }}">Empresa</a>

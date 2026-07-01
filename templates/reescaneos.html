@@ -110,7 +110,7 @@
           <div class="reescaneo-meta">Motivo: {{ item[7] or 'Sin motivo registrado' }}</div>
         </td>
         <td>
-          <div>{{ item[8]|hora_colombia }}</div>
+          <div>{{ item[8]|hora_col }}</div>
           <div class="reescaneo-meta">Solicitó: {{ item[9] or 'N/D' }}</div>
         </td>
         <td>
@@ -161,8 +161,8 @@
           <span class="pill">{{ item[4]|upper }}</span>
         </td>
         <td>
-          <div>Solicitud: {{ item[5]|hora_colombia }}</div>
-          <div class="reescaneo-meta">Cierre: {{ item[6]|hora_colombia if item[6] else 'N/D' }}</div>
+          <div>Solicitud: {{ item[5]|hora_col }}</div>
+          <div class="reescaneo-meta">Cierre: {{ item[6]|hora_col if item[6] else 'N/D' }}</div>
         </td>
       </tr>
       {% endfor %}

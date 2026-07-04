@@ -967,7 +967,7 @@ def insertar_movimientos_lote(cur, rows):
             (usuario_id, grupo_id, accion, antes_texto, despues_texto, item)
         )
 
-TIPO_DOC_OPCIONES = ("CC", "CE", "TI", "RC")
+TIPO_DOC_OPCIONES = ("CC", "CE", "TI", "RC", "PT", "PPT")
 
 def normalizar_tipo_doc(tipo_doc):
     return tipo_doc.upper().strip() if tipo_doc else ""

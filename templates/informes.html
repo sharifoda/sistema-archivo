@@ -198,6 +198,14 @@
       <div class="report-actions">
         <span class="report-status-pill {{ report.status }}">{{ report.status|upper }}</span>
         <button type="button" class="btn" onclick="verInformeImportacion('{{ report.job_id }}')">Ver informe</button>
+        {% if session.get("rol") == "admin" %}
+        <form method="post" style="margin:0;" onsubmit="return confirm('¿Seguro que deseas eliminar este informe?');">
+          <input type='hidden' name='_csrf_token' value='{{ csrf_token() }}'>
+          <input type="hidden" name="accion" value="eliminar_informe">
+          <input type="hidden" name="job_id" value="{{ report.job_id }}">
+          <button type="submit" class="btn btn-danger">Eliminar</button>
+        </form>
+        {% endif %}
       </div>
     </article>
     {% endfor %}

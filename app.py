@@ -437,6 +437,18 @@ def get_recent_import_reports(limit=10, group_id=None):
     ]
 
 
+def delete_import_report(job_id):
+    ensure_import_reports_table()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM importaciones_excel WHERE job_id = %s", (job_id,))
+    deleted = cur.rowcount or 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted > 0
+
+
 def get_group_name(group_id):
     if not group_id:
         return ""
@@ -610,7 +622,7 @@ def importacion_cerrar():
     return jsonify({"ok": True})
 
 
-@app.route("/informes")
+@app.route("/informes", methods=["GET", "POST"])
 def informes():
     if not login_requerido():
         return redirect(url_for("login"))
@@ -618,6 +630,51 @@ def informes():
     grupo_id = obtener_grupo_id()
     if not grupo_id:
         return redirect(url_for("grupos"))
+
+    if request.method == "POST":
+        if not admin_requerido():
+            flash_error(206)
+            return redirect(url_for("informes"))
+
+        accion = (request.form.get("accion") or "").strip()
+        job_id = (request.form.get("job_id") or "").strip()
+
+        if accion != "eliminar_informe" or not job_id:
+            flash_error(400)
+            return redirect(url_for("informes"))
+
+        report = get_import_report(job_id)
+        if not report:
+            flash_error(404)
+            return redirect(url_for("informes"))
+
+        deleted = delete_import_report(job_id)
+        if not deleted:
+            flash_error(900, fallback="No se pudo eliminar el informe.")
+            return redirect(url_for("informes"))
+
+        registrar_movimiento(
+            session.get("usuario_id"),
+            report.get("group_id"),
+            entidad="informe_importacion",
+            entidad_id=None,
+            accion="ELIMINAR_INFORME_IMPORTACION",
+            datos_antes={
+                "job_id": report.get("job_id"),
+                "tipo": report.get("import_type"),
+                "archivo": report.get("source_filename"),
+                "empresa": report.get("group_name"),
+                "usuario": report.get("user_name"),
+            },
+        )
+        registrar_log(
+            session.get("usuario_id"),
+            f"ELIMINAR_INFORME_IMPORTACION job_id={report.get('job_id')} archivo={report.get('source_filename') or 'N/D'}",
+            request.remote_addr,
+            report.get("group_id"),
+        )
+        flash("Informe eliminado correctamente.", "success")
+        return redirect(url_for("informes", empresa=report.get("group_id")))
 
     selected_group_id = grupo_id
     group_options = []

@@ -58,12 +58,23 @@ function hide(id) {
 function abrirModal(tipo) {
   document.body.classList.add("dashboard-modal-open");
   show("overlay" + tipo);
-  show("modal" + tipo);
+  const modal = document.getElementById("modal" + tipo);
+  if (!modal) return;
+  if (tipo === "Buscar") {
+    modal.style.display = "flex";
+    modal.classList.add("visible");
+  } else {
+    modal.style.display = "block";
+  }
 }
 
 function cerrarModal(tipo, limpiarBuscar = false) {
   hide("overlay" + tipo);
-  hide("modal" + tipo);
+  const modal = document.getElementById("modal" + tipo);
+  if (modal) {
+    modal.style.display = "none";
+    modal.classList.remove("visible");
+  }
 
   const modalAbierto = ["Caja", "CajaMasiva", "Doc", "Buscar", "Editar", "PdfDownload", "ExcelDownload"].some((name) => {
     const modal = document.getElementById("modal" + name);

@@ -58,6 +58,30 @@
     width:min(720px,92vw); background:#fff; border-radius:12px; padding:18px;
     box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:9999;
   }
+  #modalBuscar{
+    width:min(1200px,94vw);
+    max-height:85vh;
+    display:none;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  #modalBuscar.visible{
+    display:flex;
+  }
+  #buscarContenido{
+    flex:1 1 auto;
+    min-height:0;
+    max-height:calc(85vh - 120px);
+    overflow:auto;
+    margin-top:10px;
+  }
+  #modalBuscar .actions{
+    flex:0 0 auto;
+    margin-top:14px;
+    padding-top:12px;
+    border-top:1px solid rgba(183, 200, 216, 0.65);
+    background:#fff;
+  }
   .modal .actions{
     display:flex; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap;
   }
@@ -781,7 +805,7 @@
 <div class="modal" id="modalBuscar">
   <h3>📂 Resultado de busqueda</h3>
 
-  <div id="buscarContenido" class="table-wrap" style="margin-top:10px;"></div>
+  <div id="buscarContenido" class="table-wrap"></div>
 
   <div class="actions">
     <button type="button" class="btn" onclick="cerrarModal('Buscar', true)">Cerrar</button>

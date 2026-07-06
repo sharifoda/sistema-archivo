@@ -38,6 +38,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
 from collections import defaultdict
+import pyodbc
 from difflib import SequenceMatcher
 from openpyxl.styles import Font
 from flask import flash
@@ -3414,13 +3415,33 @@ def archivo():
             caja_dest = cur.fetchone()
             caja_id = caja_dest[0] if caja_dest else asegurar_caja_sin_asignar(grupo_id)  # si no cae en ninguna caja → 0
 
+            cur.execute(
+                "SELECT TOP 1 id FROM archivos WHERE grupo_id = %s AND numero = %s",
+                (grupo_id, numero)
+            )
+            archivo_existente = cur.fetchone()
+            if archivo_existente:
+                cur.close()
+                conn.close()
+                flash_error(400, detail=f"El documento {numero} ya existe en esta empresa.")
+                return redirect(url_for("archivo"))
+
             # 2) Insertar archivo YA con caja_id
-            cur.execute("""
-                INSERT INTO archivos (caja_id, numero, nombre, pdf_path, grupo_id, creado_por, tipo_doc)
-                VALUES (%s, %s, %s, NULL, %s, %s, %s)
-                RETURNING id
-            """, (caja_id, numero, nombre, grupo_id, session.get("usuario_id"), tipo_doc))
-            archivo_id = cur.fetchone()[0]
+            try:
+                cur.execute("""
+                    INSERT INTO archivos (caja_id, numero, nombre, pdf_path, grupo_id, creado_por, tipo_doc)
+                    VALUES (%s, %s, %s, NULL, %s, %s, %s)
+                    RETURNING id
+                """, (caja_id, numero, nombre, grupo_id, session.get("usuario_id"), tipo_doc))
+                archivo_id = cur.fetchone()[0]
+            except pyodbc.IntegrityError as exc:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                if "archivos_grupo_numero_idx" in str(exc) or "duplicate key" in str(exc).lower():
+                    flash_error(400, detail=f"El documento {numero} ya existe en esta empresa.")
+                    return redirect(url_for("archivo"))
+                raise
 
             # 3) PDF opcional: guardar y actualizar pdf_path
             pdf_name = None

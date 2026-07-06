@@ -22,6 +22,15 @@ def agregar_archivo(numero, nombre, grupo_id, creado_por=None, tipo_doc="CC"):
     conn = get_db()
     cur = conn.cursor()
 
+    cur.execute(
+        "SELECT TOP 1 id FROM archivos WHERE grupo_id = %s AND numero = %s",
+        (grupo_id, numero)
+    )
+    if cur.fetchone():
+        cur.close()
+        conn.close()
+        raise ValueError(f"El documento {numero} ya existe en esta empresa.")
+
     caja_id = _buscar_caja_para_numero(cur, numero, grupo_id)
     if caja_id is None:
         cur.close()

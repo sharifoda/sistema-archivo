@@ -2587,13 +2587,17 @@ def archivos_legacy():
                 nombre = f"Documento {numero}"
             nombre = normalizar_nombre(nombre)
 
-            agregar_archivo(
-                numero,
-                nombre,
-                grupo_id,
-                creado_por=session.get("usuario_id"),
-                tipo_doc=tipo_doc
-            )
+            try:
+                agregar_archivo(
+                    numero,
+                    nombre,
+                    grupo_id,
+                    creado_por=session.get("usuario_id"),
+                    tipo_doc=tipo_doc
+                )
+            except ValueError as exc:
+                flash_error(400, detail=str(exc))
+                return redirect(url_for("archivos"))
 
             # Log con info real
             conn = get_db()

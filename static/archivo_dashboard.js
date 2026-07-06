@@ -140,8 +140,8 @@ function getImportLabels(job) {
       defaultMessage: "Carga de PDF en proceso.",
       pendingDetail: "Subiendo archivos y preparando la carga masiva de PDF...",
       processed: "Procesados",
-      inserted: "Nuevos",
-      merged: "Unidos",
+      inserted: "Cargados",
+      merged: "Reemplazados",
       ignored: "No encontrados",
       invalid: "Invalidos"
     };

@@ -184,9 +184,9 @@
           <span>Usuario: {{ report.user_name or "N/D" }}</span>
           <span>{{ "PDFs" if report.import_type == "pdf" else "Filas" }}: {{ report.total_rows }}</span>
           <span>Procesados: {{ report.processed_rows }}</span>
-          <span>{{ "Nuevos" if report.import_type == "pdf" else "Exitosos" }}: {{ report.inserted }}</span>
+          <span>{{ "Cargados" if report.import_type == "pdf" else "Exitosos" }}: {{ report.inserted }}</span>
           {% if report.import_type == "pdf" %}
-          <span>Unidos: {{ report.merged }}</span>
+          <span>Reemplazados: {{ report.merged }}</span>
           <span>No encontrados: {{ report.ignored }}</span>
           {% else %}
           <span>Repetidos: {{ report.ignored }}</span>
@@ -257,8 +257,8 @@
         importType,
         title: "Informe de carga PDF",
         total: "Total PDFs",
-        inserted: "Nuevos",
-        merged: "Unidos",
+        inserted: "Cargados",
+        merged: "Reemplazados",
         ignored: "No encontrados",
         invalid: "Invalidos detectados"
       };

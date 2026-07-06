@@ -505,8 +505,8 @@ def get_import_labels(import_type):
             "kind": "pdf",
             "item": "PDF",
             "plural": "PDFs",
-            "success_label": "nuevos",
-            "merged_label": "unidos",
+            "success_label": "cargados",
+            "merged_label": "reemplazados",
             "ignored_label": "no encontrados",
         }
     return {
@@ -1075,6 +1075,24 @@ def unir_pdf_existente(pdf_old, file, numero_documento, grupo_id):
         return None
 
 
+def reemplazar_pdf_existente(pdf_old, file, numero_documento, grupo_id):
+    final_name = guardar_pdf(file, numero_documento, grupo_id)
+    if not final_name:
+        return None
+
+    if pdf_old and pdf_old != final_name:
+        old_path = pdf_old
+        if not os.path.isabs(old_path):
+            old_path = os.path.join(app.config["UPLOAD_FOLDER"], old_path)
+        try:
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        except Exception:
+            app.logger.warning("No se pudo borrar PDF anterior durante reemplazo: %s", old_path)
+
+    return final_name
+
+
 def obtener_numero_desde_nombre_pdf(filename):
     if not filename:
         return None
@@ -1523,8 +1541,8 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
 
     conn = get_db()
     cur = conn.cursor()
-    nuevos = 0
-    unidos = 0
+    cargados = 0
+    reemplazados = 0
     no_encontrados = 0
     invalidos = 0
     invalid_details = []
@@ -1542,12 +1560,12 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
-                    inserted=nuevos,
-                    merged=unidos,
+                    inserted=cargados,
+                    merged=reemplazados,
                     ignored=no_encontrados,
                     invalid=invalidos,
                     invalid_details=invalid_details,
-                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                    detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
                 )
                 continue
 
@@ -1558,12 +1576,12 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
-                    inserted=nuevos,
-                    merged=unidos,
+                    inserted=cargados,
+                    merged=reemplazados,
                     ignored=no_encontrados,
                     invalid=invalidos,
                     invalid_details=invalid_details,
-                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                    detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
                 )
                 continue
 
@@ -1578,12 +1596,12 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
-                    inserted=nuevos,
-                    merged=unidos,
+                    inserted=cargados,
+                    merged=reemplazados,
                     ignored=no_encontrados,
                     invalid=invalidos,
                     invalid_details=invalid_details,
-                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                    detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
                 )
                 continue
 
@@ -1598,12 +1616,12 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
-                    inserted=nuevos,
-                    merged=unidos,
+                    inserted=cargados,
+                    merged=reemplazados,
                     ignored=no_encontrados,
                     invalid=invalidos,
                     invalid_details=invalid_details,
-                    detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                    detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
                 )
                 continue
 
@@ -1621,25 +1639,25 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             file_obj = StoredUpload(display_name or filename, pdf_bytes)
 
             if pdf_old:
-                pdf_name = unir_pdf_existente(pdf_old, file_obj, numero, grupo_id)
+                pdf_name = reemplazar_pdf_existente(pdf_old, file_obj, numero, grupo_id)
                 if not pdf_name:
                     invalidos += 1
-                    add_invalid_detail(invalid_details, display_name or filename, reason="no se pudo unir el PDF")
+                    add_invalid_detail(invalid_details, display_name or filename, reason="no se pudo reemplazar el PDF")
                     set_import_job(
                         job_id,
                         processed_rows=procesados,
-                        inserted=nuevos,
-                        merged=unidos,
+                        inserted=cargados,
+                        merged=reemplazados,
                         ignored=no_encontrados,
                         invalid=invalidos,
                         invalid_details=invalid_details,
-                        detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                        detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
                     )
                     continue
-                unidos += 1
+                reemplazados += 1
             else:
                 pdf_name = guardar_pdf(file_obj, numero, grupo_id)
-                nuevos += 1
+                cargados += 1
 
             cur.execute(
                 "UPDATE archivos SET pdf_path = %s WHERE id = %s AND grupo_id = %s",
@@ -1665,12 +1683,12 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             set_import_job(
                 job_id,
                 processed_rows=procesados,
-                inserted=nuevos,
-                merged=unidos,
+                inserted=cargados,
+                merged=reemplazados,
                 ignored=no_encontrados,
                 invalid=invalidos,
                 invalid_details=invalid_details,
-                detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+                detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
             )
 
         conn.commit()
@@ -1683,8 +1701,8 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             accion="CARGA_MASIVA_PDF",
             datos_despues={
                 "procesados": procesados,
-                "nuevos": nuevos,
-                "unidos": unidos,
+                "cargados": cargados,
+                "reemplazados": reemplazados,
                 "no_encontrados": no_encontrados,
                 "invalidos": invalidos,
                 "archivos_lote": total_files,
@@ -1693,7 +1711,7 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
 
         registrar_log(
             usuario_id,
-            f"CARGA_MASIVA_PDF lote={total_files} nuevos={nuevos} unidos={unidos} no_encontrados={no_encontrados} invalidos={invalidos}",
+            f"CARGA_MASIVA_PDF lote={total_files} cargados={cargados} reemplazados={reemplazados} no_encontrados={no_encontrados} invalidos={invalidos}",
             client_ip,
             grupo_id
         )
@@ -1709,13 +1727,13 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 else "Carga masiva de PDF finalizada con observaciones."
             ),
             processed_rows=total_files,
-            inserted=nuevos,
-            merged=unidos,
+            inserted=cargados,
+            merged=reemplazados,
             ignored=no_encontrados,
             invalid=invalidos,
             invalid_details=invalid_details,
             error_code=None if final_status == "success" else 503,
-            detail=f"Nuevos: {nuevos} | Unidos: {unidos} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
+            detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
             finished_at=datetime.utcnow().isoformat(),
             report_saved=True,
         )
@@ -1729,8 +1747,8 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             status="failed",
             message=error_text(904, fallback="La carga masiva de PDF falló."),
             processed_rows=procesados,
-            inserted=nuevos,
-            merged=unidos,
+            inserted=cargados,
+            merged=reemplazados,
             ignored=no_encontrados,
             invalid=invalidos,
             invalid_details=invalid_details,

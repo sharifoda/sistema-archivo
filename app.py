@@ -1127,6 +1127,13 @@ def obtener_nombre_original_pdf(filename):
     return base
 
 
+def resumir_nombres_archivos(file_names, limit=5):
+    visibles = [obtener_nombre_original_pdf(name) or name for name in (file_names or [])]
+    if len(visibles) <= limit:
+        return visibles
+    return visibles[:limit] + [f"... (+{len(visibles) - limit} mas)"]
+
+
 def login_requerido():
     return "usuario" in session
 
@@ -1523,6 +1530,7 @@ def importar_excel_job(file_path, grupo_id, usuario_id, job_id):
 
 def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_ip=""):
     total_files = len(file_names or [])
+    job_started_at = time.perf_counter()
     set_import_job(
         job_id,
         import_type="pdf",
@@ -1548,12 +1556,35 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
     invalidos = 0
     invalid_details = []
     procesados = 0
+    ultimo_archivo = None
+
+    app.logger.info(
+        "Carga masiva PDF hilo iniciado job=%s grupo=%s usuario=%s archivos=%s dir=%s ejemplos=%s",
+        job_id,
+        grupo_id,
+        usuario_id,
+        total_files,
+        job_dir,
+        resumir_nombres_archivos(file_names),
+    )
 
     try:
         for index, filename in enumerate(file_names, start=1):
             abs_path = os.path.join(job_dir, filename)
             display_name = obtener_nombre_original_pdf(filename)
             procesados = index
+            ultimo_archivo = display_name or filename
+
+            if index == 1 or index % 25 == 0 or index == total_files:
+                app.logger.info(
+                    "Carga masiva PDF progreso job=%s grupo=%s usuario=%s archivo=%s indice=%s/%s",
+                    job_id,
+                    grupo_id,
+                    usuario_id,
+                    ultimo_archivo,
+                    index,
+                    total_files,
+                )
 
             if not filename.lower().endswith(".pdf"):
                 invalidos += 1
@@ -1592,6 +1623,16 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             )
             row = cur.fetchone()
             if not row:
+                app.logger.warning(
+                    "Carga masiva PDF documento no encontrado job=%s grupo=%s usuario=%s archivo=%s numero=%s indice=%s/%s",
+                    job_id,
+                    grupo_id,
+                    usuario_id,
+                    ultimo_archivo,
+                    numero,
+                    index,
+                    total_files,
+                )
                 no_encontrados += 1
                 add_invalid_detail(invalid_details, display_name or filename, reason="documento no encontrado")
                 set_import_job(
@@ -1693,6 +1734,19 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
             )
 
         conn.commit()
+        elapsed = time.perf_counter() - job_started_at
+        app.logger.info(
+            "Carga masiva PDF finalizada job=%s grupo=%s usuario=%s procesados=%s cargados=%s reemplazados=%s no_encontrados=%s invalidos=%s segundos=%.2f",
+            job_id,
+            grupo_id,
+            usuario_id,
+            procesados,
+            cargados,
+            reemplazados,
+            no_encontrados,
+            invalidos,
+            elapsed,
+        )
 
         registrar_movimiento(
             usuario_id,
@@ -1741,7 +1795,22 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
         persist_import_report(get_import_job(job_id))
     except Exception:
         conn.rollback()
-        app.logger.exception("Error en carga masiva de PDF")
+        elapsed = time.perf_counter() - job_started_at
+        app.logger.exception(
+            "Error en carga masiva de PDF job=%s grupo=%s usuario=%s procesados=%s/%s ultimo_archivo=%s cargados=%s reemplazados=%s no_encontrados=%s invalidos=%s dir=%s segundos=%.2f",
+            job_id,
+            grupo_id,
+            usuario_id,
+            procesados,
+            total_files,
+            ultimo_archivo,
+            cargados,
+            reemplazados,
+            no_encontrados,
+            invalidos,
+            job_dir,
+            elapsed,
+        )
         set_import_job(
             job_id,
             import_type="pdf",
@@ -3170,12 +3239,14 @@ def archivo():
             os.makedirs(uploads_dir, exist_ok=True)
             stored_names = []
             app.logger.info(
-                "Preparando carga masiva PDF grupo=%s usuario=%s archivos=%s mb=%.2f content_length=%s",
+                "Preparando carga masiva PDF grupo=%s usuario=%s archivos=%s mb=%.2f content_length=%s ip=%s ejemplos=%s",
                 grupo_id,
                 session.get("usuario_id"),
                 len(pdf_files),
                 total_bytes / (1024 * 1024),
                 request.content_length,
+                request.remote_addr,
+                resumir_nombres_archivos([os.path.basename(f.filename or "") for f in pdf_files]),
             )
             try:
                 for index, file in enumerate(pdf_files, start=1):
@@ -3187,18 +3258,23 @@ def archivo():
                     stored_names.append(final_name)
                     if index % 50 == 0 or index == len(pdf_files):
                         app.logger.info(
-                            "Carga masiva PDF temporal grupo=%s progreso=%s/%s",
+                            "Carga masiva PDF temporal grupo=%s usuario=%s archivo=%s progreso=%s/%s",
                             grupo_id,
+                            session.get("usuario_id"),
+                            original_name,
                             index,
                             len(pdf_files),
                         )
             except Exception:
                 shutil.rmtree(uploads_dir, ignore_errors=True)
                 app.logger.exception(
-                    "Fallo preparando carga masiva PDF grupo=%s usuario=%s archivos=%s",
+                    "Fallo preparando carga masiva PDF grupo=%s usuario=%s archivos=%s mb=%.2f content_length=%s dir=%s",
                     grupo_id,
                     session.get("usuario_id"),
                     len(pdf_files),
+                    total_bytes / (1024 * 1024),
+                    request.content_length,
+                    uploads_dir,
                 )
                 flash_error(904, fallback="No se pudieron preparar los PDFs para la carga masiva.")
                 return redirect(url_for("archivo"))
@@ -3208,13 +3284,14 @@ def archivo():
             session["last_import_job_id"] = job_id
             prep_elapsed = time.perf_counter() - prep_started_at
             app.logger.info(
-                "Carga masiva PDF preparada job=%s grupo=%s usuario=%s archivos=%s mb=%.2f segundos=%.2f",
+                "Carga masiva PDF preparada job=%s grupo=%s usuario=%s archivos=%s mb=%.2f segundos=%.2f dir=%s",
                 job_id,
                 grupo_id,
                 session.get("usuario_id"),
                 len(pdf_files),
                 total_bytes / (1024 * 1024),
                 prep_elapsed,
+                uploads_dir,
             )
             set_import_job(
                 job_id,
@@ -3236,6 +3313,13 @@ def archivo():
                 daemon=True
             )
             t.start()
+            app.logger.info(
+                "Carga masiva PDF hilo lanzado job=%s grupo=%s usuario=%s archivos=%s",
+                job_id,
+                grupo_id,
+                session.get("usuario_id"),
+                len(stored_names),
+            )
 
             flash("Carga masiva de PDF iniciada. Espera a que finalice para continuar.", "info")
             return redirect(url_for("archivo", import_job=job_id))

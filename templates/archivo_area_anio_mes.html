@@ -14,6 +14,7 @@
     {% if session.get("rol") == "admin" %}
     <div class="dashboard-toolbar" style="align-items: end; margin-bottom: 20px; flex-wrap: wrap;">
         <form method="post" style="display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="accion" value="crear_area_anio">
             <div>
                 <label for="anio">Año</label>
@@ -27,6 +28,7 @@
     <section class="card-panel" style="margin-bottom: 24px;">
         <h3>Agregar documento</h3>
         <form method="post" enctype="multipart/form-data" class="dashboard-toolbar" style="align-items: end; gap: 14px; flex-wrap: wrap;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="accion" value="agregar_area_registro">
             <div>
                 <label for="periodo_id">Mes</label>
@@ -74,6 +76,7 @@
 
         {% if session.get("rol") == "admin" %}
         <form method="post" class="dashboard-toolbar" style="align-items:end; gap:12px; margin-bottom:20px;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="accion" value="crear_area_mes">
             <input type="hidden" name="anio_id" value="{{ year.id }}">
             <div>

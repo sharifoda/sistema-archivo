@@ -24,6 +24,7 @@
     <section class="card-panel" style="margin-bottom: 24px;">
         <h3>Agregar documento</h3>
         <form method="post" enctype="multipart/form-data" class="dashboard-toolbar" style="align-items:end; gap:14px; flex-wrap:wrap;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="accion" value="agregar_area_registro_lista">
             <div>
                 <label for="numero_documento">Documento</label>

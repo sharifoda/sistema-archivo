@@ -18,6 +18,7 @@
     <section class="card-panel" style="margin-bottom: 28px;">
         <h3 style="margin-bottom: 14px;">Crear area</h3>
         <form method="post" class="dashboard-toolbar" style="align-items: end; gap: 16px; flex-wrap: wrap;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="accion" value="crear_area">
             <div>
                 <label for="nombre_area">Nombre</label>

@@ -3,17 +3,20 @@
 {% block title %}Areas{% endblock %}
 
 {% block content %}
-<section class="card-panel">
-    <div class="section-heading">
-        <div>
-            <h2>Seleccion de areas</h2>
-            <p>Elige el area de trabajo de {{ grupo_actual or "la empresa activa" }}.</p>
+<section class="card-panel" style="padding: 28px 24px 34px;">
+    <section class="card-panel" style="margin-bottom: 28px; padding: 28px; background: linear-gradient(135deg, rgba(17, 77, 124, 0.06), rgba(38, 191, 211, 0.08));">
+        <div style="max-width: 940px;">
+            <div class="hero-badge">Seleccion de areas</div>
+            <h2 style="margin: 12px 0 10px; font-size: 40px; line-height: 1.05;">Bienvenido {{ session.get("usuario") }}</h2>
+            <p style="max-width: 820px; font-size: 18px; line-height: 1.7; color: #4f6787; margin-bottom: 0;">
+                Elige el area de trabajo de {{ grupo_actual or "la empresa activa" }} para continuar. Cada area mantiene su propia organizacion documental y su propio flujo operativo.
+            </p>
         </div>
-    </div>
+    </section>
 
     {% if session.get("rol") == "admin" %}
-    <section class="card-panel" style="margin-bottom: 24px;">
-        <h3>Crear area</h3>
+    <section class="card-panel" style="margin-bottom: 28px;">
+        <h3 style="margin-bottom: 14px;">Crear area</h3>
         <form method="post" class="dashboard-toolbar" style="align-items: end; gap: 16px; flex-wrap: wrap;">
             <input type="hidden" name="accion" value="crear_area">
             <div>
@@ -33,12 +36,14 @@
     </section>
     {% endif %}
 
-    <div class="box-grid">
+    <div style="display:flex; flex-wrap:wrap; gap:26px; justify-content: {{ 'center' if areas|length == 1 else 'space-between' }};">
         {% for area in areas %}
-        <article class="box-card">
-            <div class="box-icon">🗂</div>
-            <h3>{{ area.nombre }}</h3>
-            <p>{{ area.tipo_label }}</p>
+        <article class="box-card" style="width:min(260px, 100%); min-height:220px; display:flex; flex-direction:column; justify-content:space-between; align-items:flex-start; padding:26px 24px;">
+            <div>
+                <div class="box-icon">A</div>
+                <h3 style="margin: 14px 0 8px;">{{ area.nombre }}</h3>
+                <p style="margin-bottom: 0;">{{ area.tipo_label }}</p>
+            </div>
             <a class="btn btn-primary" href="{{ url_for('seleccionar_area', area_id=area.id) }}">Entrar</a>
         </article>
         {% endfor %}

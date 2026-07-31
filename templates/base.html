@@ -33,6 +33,7 @@
         {% endif %}
     </header>
 
+    {% if not hide_nav %}
     <nav class="app-nav">
       {% if session.get("usuario") %}
         <a href="{{ url_for('inicio') }}">Inicio</a>
@@ -54,6 +55,7 @@
         <a href="{{ url_for('admin_logs') }}">Logs</a>
       {% endif %}
     </nav>
+    {% endif %}
 
     <main class="app-content">
         {% with messages = get_flashed_messages(with_categories=true) %}

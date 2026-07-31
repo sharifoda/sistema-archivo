@@ -2490,6 +2490,7 @@ def areas():
         "areas.html",
         areas=areas_data,
         area_tipos=AREA_TIPOS_CREABLES,
+        hide_nav=True,
     )
 
 

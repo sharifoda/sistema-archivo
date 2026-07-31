@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}{{ area[2] }}{% endblock %}
+
+{% block content %}
+<section class="card-panel">
+    <div class="section-heading">
+        <div>
+            <h2>{{ area[2] }}</h2>
+            <p>Area tipo {{ area_label_actual }}. Agrupacion por documento y orden por fecha mas reciente.</p>
+        </div>
+    </div>
+
+    <section class="card-panel" style="margin-bottom: 24px;">
+        <form method="get" class="dashboard-toolbar" style="align-items:end; gap:12px; flex-wrap:wrap;">
+            <div>
+                <label for="buscar_area">Buscar documento</label>
+                <input id="buscar_area" type="text" name="buscar_area" value="{{ buscar_area or '' }}">
+            </div>
+            <button type="submit" class="btn">Buscar</button>
+        </form>
+    </section>
+
+    <section class="card-panel" style="margin-bottom: 24px;">
+        <h3>Agregar documento</h3>
+        <form method="post" enctype="multipart/form-data" class="dashboard-toolbar" style="align-items:end; gap:14px; flex-wrap:wrap;">
+            <input type="hidden" name="accion" value="agregar_area_registro_lista">
+            <div>
+                <label for="numero_documento">Documento</label>
+                <input id="numero_documento" type="number" name="numero_documento" required>
+            </div>
+            <div>
+                <label for="nombre_documento">Nombre</label>
+                <input id="nombre_documento" type="text" name="nombre_documento" required>
+            </div>
+            <div>
+                <label for="fecha_documento">Fecha</label>
+                <input id="fecha_documento" type="date" name="fecha_documento" required>
+            </div>
+            <div>
+                <label for="tipo_id">Tipo ID</label>
+                <input id="tipo_id" type="text" name="tipo_id">
+            </div>
+            <div>
+                <label for="pdf">PDF</label>
+                <input id="pdf" type="file" name="pdf" accept="application/pdf">
+            </div>
+            <button type="submit" class="btn btn-primary">Guardar documento</button>
+        </form>
+    </section>
+
+    {% for grupo in grupos_documento %}
+    <article class="card-panel" style="margin-bottom: 20px;">
+        <h3>Documento {{ grupo.numero_documento }}</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Nombre</th>
+                    <th>Tipo ID</th>
+                    <th>PDF</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in grupo.registros %}
+                <tr>
+                    <td>{{ item.fecha_documento }}</td>
+                    <td>{{ item.nombre_documento }}</td>
+                    <td>{{ item.tipo_id or "-" }}</td>
+                    <td>
+                        {% if item.pdf_path %}
+                        <a class="btn" href="{{ url_for('ver_pdf_area', registro_id=item.id) }}" target="_blank">Ver PDF</a>
+                        {% else %}
+                        No
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </article>
+    {% else %}
+    <p>No hay documentos registrados en esta area.</p>
+    {% endfor %}
+</section>
+{% endblock %}

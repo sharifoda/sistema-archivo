@@ -25,6 +25,9 @@
                     <span>Sesion activa</span>
                     <strong>{{ session["usuario"] }}</strong>
                 </div>
+                {% if session.get("grupo_id") %}
+                <a id="change-area-link" href="{{ url_for('areas') }}">Cambiar de area</a>
+                {% endif %}
                 <a id="logout-link" href="{{ url_for('logout') }}">Cerrar sesion</a>
             </div>
         {% endif %}

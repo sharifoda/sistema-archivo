@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Areas{% endblock %}
+
+{% block content %}
+<section class="card-panel">
+    <div class="section-heading">
+        <div>
+            <h2>Seleccion de areas</h2>
+            <p>Elige el area de trabajo de {{ grupo_actual or "la empresa activa" }}.</p>
+        </div>
+    </div>
+
+    {% if session.get("rol") == "admin" %}
+    <section class="card-panel" style="margin-bottom: 24px;">
+        <h3>Crear area</h3>
+        <form method="post" class="dashboard-toolbar" style="align-items: end; gap: 16px; flex-wrap: wrap;">
+            <input type="hidden" name="accion" value="crear_area">
+            <div>
+                <label for="nombre_area">Nombre</label>
+                <input id="nombre_area" type="text" name="nombre" required>
+            </div>
+            <div>
+                <label for="tipo_area">Tipo</label>
+                <select id="tipo_area" name="tipo" required>
+                    {% for tipo in area_tipos %}
+                    <option value="{{ tipo[0] }}">{{ tipo[1] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Crear area</button>
+        </form>
+    </section>
+    {% endif %}
+
+    <div class="box-grid">
+        {% for area in areas %}
+        <article class="box-card">
+            <div class="box-icon">🗂</div>
+            <h3>{{ area.nombre }}</h3>
+            <p>{{ area.tipo_label }}</p>
+            <a class="btn btn-primary" href="{{ url_for('seleccionar_area', area_id=area.id) }}">Entrar</a>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

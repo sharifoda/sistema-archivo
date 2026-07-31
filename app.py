@@ -59,9 +59,12 @@ from error_catalog import error_text
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "pdfs")
+AREA_UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "areas")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(AREA_UPLOAD_FOLDER, exist_ok=True)
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["AREA_UPLOAD_FOLDER"] = AREA_UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 260 * 1024 * 1024  # 260MB total request size
 app.config["MASSIVE_PDF_MAX_FILES"] = 500
 app.config["MASSIVE_PDF_MAX_TOTAL_BYTES"] = 250 * 1024 * 1024
@@ -78,6 +81,34 @@ IMPORT_JOBS = {}
 IMPORT_JOBS_LOCK = threading.Lock()
 IMPORT_REPORTS_TABLE_READY = False
 RESCANS_TABLE_READY = False
+AREAS_TABLES_READY = False
+
+AREA_TIPO_CLASICO = "clasico"
+AREA_TIPO_ANIO_MES = "anio_mes"
+AREA_TIPO_LISTA = "lista"
+AREA_TIPOS = (
+    (AREA_TIPO_CLASICO, "Archivo actual"),
+    (AREA_TIPO_ANIO_MES, "Años y meses"),
+    (AREA_TIPO_LISTA, "Listado por documento"),
+)
+AREA_TIPOS_CREABLES = (
+    (AREA_TIPO_ANIO_MES, "Años y meses"),
+    (AREA_TIPO_LISTA, "Listado por documento"),
+)
+MONTH_LABELS = {
+    1: "Enero",
+    2: "Febrero",
+    3: "Marzo",
+    4: "Abril",
+    5: "Mayo",
+    6: "Junio",
+    7: "Julio",
+    8: "Agosto",
+    9: "Septiembre",
+    10: "Octubre",
+    11: "Noviembre",
+    12: "Diciembre",
+}
 
 
 def flash_error(code, fallback=None, detail=None):
@@ -181,6 +212,530 @@ def ensure_rescans_table():
     cur.close()
     conn.close()
     RESCANS_TABLE_READY = True
+
+
+def ensure_areas_tables():
+    global AREAS_TABLES_READY
+    if AREAS_TABLES_READY:
+        return
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        IF OBJECT_ID('dbo.areas', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.areas (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                grupo_id INT NOT NULL,
+                nombre NVARCHAR(255) NOT NULL,
+                tipo NVARCHAR(30) NOT NULL,
+                activa BIT NOT NULL CONSTRAINT DF_areas_activa DEFAULT (1),
+                creada_por INT NULL,
+                creada_en DATETIME2 NOT NULL CONSTRAINT DF_areas_creada_en DEFAULT (SYSDATETIME())
+            );
+        END
+
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE name = 'UX_areas_grupo_nombre'
+              AND object_id = OBJECT_ID('dbo.areas')
+        )
+        BEGIN
+            CREATE UNIQUE INDEX UX_areas_grupo_nombre
+            ON dbo.areas (grupo_id, nombre);
+        END
+
+        IF OBJECT_ID('dbo.area_periodos', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.area_periodos (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                area_id INT NOT NULL,
+                anio INT NOT NULL,
+                mes INT NULL,
+                nombre NVARCHAR(255) NOT NULL,
+                parent_id INT NULL,
+                creado_por INT NULL,
+                creado_en DATETIME2 NOT NULL CONSTRAINT DF_area_periodos_creado_en DEFAULT (SYSDATETIME())
+            );
+        END
+
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE name = 'UX_area_periodos_area_parent_nombre'
+              AND object_id = OBJECT_ID('dbo.area_periodos')
+        )
+        BEGIN
+            CREATE UNIQUE INDEX UX_area_periodos_area_parent_nombre
+            ON dbo.area_periodos (area_id, parent_id, nombre);
+        END
+
+        IF OBJECT_ID('dbo.area_registros', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.area_registros (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                area_id INT NOT NULL,
+                periodo_id INT NULL,
+                numero_documento BIGINT NOT NULL,
+                nombre_documento NVARCHAR(255) NOT NULL,
+                fecha_documento DATE NOT NULL,
+                tipo_id NVARCHAR(30) NULL,
+                pdf_path NVARCHAR(500) NULL,
+                creado_por INT NULL,
+                creado_en DATETIME2 NOT NULL CONSTRAINT DF_area_registros_creado_en DEFAULT (SYSDATETIME())
+            );
+        END
+
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE name = 'IX_area_registros_area_numero_fecha'
+              AND object_id = OBJECT_ID('dbo.area_registros')
+        )
+        BEGIN
+            CREATE INDEX IX_area_registros_area_numero_fecha
+            ON dbo.area_registros (area_id, numero_documento, fecha_documento DESC, id DESC);
+        END
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    AREAS_TABLES_READY = True
+
+
+def get_area_label(tipo):
+    for key, label in AREA_TIPOS:
+        if key == tipo:
+            return label
+    return tipo or "Area"
+
+
+def clear_area_session():
+    session.pop("area_id", None)
+    session.pop("area_nombre", None)
+    session.pop("area_tipo", None)
+
+
+def set_area_session(area_row):
+    session["area_id"] = area_row[0]
+    session["area_nombre"] = area_row[2]
+    session["area_tipo"] = area_row[3]
+
+
+def ensure_default_area(grupo_id, creado_por=None):
+    ensure_areas_tables()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT TOP 1 id, grupo_id, nombre, tipo, activa
+        FROM areas
+        WHERE grupo_id = %s AND tipo = %s
+        ORDER BY id
+        """,
+        (grupo_id, AREA_TIPO_CLASICO)
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.execute(
+            """
+            INSERT INTO areas (grupo_id, nombre, tipo, activa, creada_por)
+            VALUES (%s, %s, %s, 1, %s)
+            RETURNING id
+            """,
+            (grupo_id, "Archivo actual", AREA_TIPO_CLASICO, creado_por)
+        )
+        area_id = cur.fetchone()[0]
+        conn.commit()
+        cur.execute(
+            "SELECT id, grupo_id, nombre, tipo, activa FROM areas WHERE id = %s",
+            (area_id,)
+        )
+        row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row
+
+
+def get_areas_by_group(grupo_id, include_inactive=False):
+    ensure_default_area(grupo_id, creado_por=session.get("usuario_id"))
+    conn = get_db()
+    cur = conn.cursor()
+    sql = """
+        SELECT id, grupo_id, nombre, tipo, activa
+        FROM areas
+        WHERE grupo_id = %s
+    """
+    params = [grupo_id]
+    if not include_inactive:
+        sql += " AND activa = 1"
+    sql += """
+        ORDER BY
+            CASE WHEN tipo = %s THEN 0 ELSE 1 END,
+            nombre,
+            id
+    """
+    params.append(AREA_TIPO_CLASICO)
+    cur.execute(sql, tuple(params))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_area_by_id(area_id, grupo_id=None):
+    if not area_id:
+        return None
+    ensure_areas_tables()
+    conn = get_db()
+    cur = conn.cursor()
+    sql = "SELECT id, grupo_id, nombre, tipo, activa FROM areas WHERE id = %s"
+    params = [area_id]
+    if grupo_id:
+        sql += " AND grupo_id = %s"
+        params.append(grupo_id)
+    cur.execute(sql, tuple(params))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row
+
+
+def get_current_area(grupo_id=None):
+    area_id = session.get("area_id")
+    if not area_id:
+        return None
+    return get_area_by_id(area_id, grupo_id=grupo_id)
+
+
+def area_requerida():
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return False
+    area = get_current_area(grupo_id=grupo_id)
+    if not area:
+        return False
+    if not area[4]:
+        clear_area_session()
+        return False
+    if session.get("area_nombre") != area[2] or session.get("area_tipo") != area[3]:
+        set_area_session(area)
+    return True
+
+
+def guardar_pdf_area(file, area_id):
+    filename = secure_filename(file.filename or "documento.pdf") or "documento.pdf"
+    ext = os.path.splitext(filename)[1].lower() or ".pdf"
+    final_name = f"area_{area_id}_{uuid.uuid4().hex}{ext}"
+    abs_path = os.path.join(app.config["AREA_UPLOAD_FOLDER"], final_name)
+    file.save(abs_path)
+    return final_name
+
+
+def parse_fecha_documento(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def get_area_period_rows(area_id):
+    ensure_areas_tables()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, area_id, anio, mes, nombre, parent_id
+        FROM area_periodos
+        WHERE area_id = %s
+        ORDER BY anio DESC, CASE WHEN mes IS NULL THEN 0 ELSE 1 END, mes ASC, id ASC
+        """,
+        (area_id,)
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_area_record_rows(area_id, periodo_id=None, search=None):
+    ensure_areas_tables()
+    conn = get_db()
+    cur = conn.cursor()
+    sql = """
+        SELECT id, area_id, periodo_id, numero_documento, nombre_documento, fecha_documento, tipo_id, pdf_path
+        FROM area_registros
+        WHERE area_id = %s
+    """
+    params = [area_id]
+    if periodo_id is not None:
+        sql += " AND periodo_id = %s"
+        params.append(periodo_id)
+    if search:
+        sql += " AND (CAST(numero_documento AS NVARCHAR(50)) LIKE %s OR nombre_documento LIKE %s)"
+        params.extend([f"%{search}%", f"%{search}%"])
+    sql += " ORDER BY fecha_documento DESC, id DESC"
+    cur.execute(sql, tuple(params))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def create_area_period(area_id, anio, nombre, mes=None, parent_id=None, creado_por=None):
+    ensure_areas_tables()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO area_periodos (area_id, anio, mes, nombre, parent_id, creado_por)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (area_id, anio, mes, nombre, parent_id, creado_por)
+    )
+    period_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return period_id
+
+
+def create_area_record(area_id, numero_documento, nombre_documento, fecha_documento, tipo_id="", pdf_path=None, periodo_id=None, creado_por=None):
+    ensure_areas_tables()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO area_registros (
+            area_id, periodo_id, numero_documento, nombre_documento, fecha_documento, tipo_id, pdf_path, creado_por
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (area_id, periodo_id, numero_documento, nombre_documento, fecha_documento, tipo_id or None, pdf_path, creado_por)
+    )
+    record_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return record_id
+
+
+def render_area_anio_mes(area, grupo_id):
+    area_id = area[0]
+
+    if request.method == "POST":
+        accion = request.form.get("accion")
+
+        if accion == "crear_area_anio":
+            if not admin_requerido():
+                flash_error(200)
+                return redirect(url_for("archivo"))
+            try:
+                anio = int(request.form.get("anio"))
+            except Exception:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            if anio < 1900 or anio > 2200:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            try:
+                period_id = create_area_period(
+                    area_id,
+                    anio,
+                    str(anio),
+                    mes=None,
+                    parent_id=None,
+                    creado_por=session.get("usuario_id"),
+                )
+                registrar_log(session.get("usuario_id"), f"CREAR_AREA_ANIO area_id={area_id} periodo_id={period_id} anio={anio}", request.remote_addr, grupo_id)
+                flash("Año creado correctamente.", "success")
+            except Exception as exc:
+                app.logger.exception("Error creando año de area")
+                if "UX_area_periodos_area_parent_nombre" in str(exc):
+                    flash_error(400, detail=f"El año {anio} ya existe en esta area.")
+                else:
+                    flash_error(900)
+            return redirect(url_for("archivo"))
+
+        if accion == "crear_area_mes":
+            if not admin_requerido():
+                flash_error(200)
+                return redirect(url_for("archivo"))
+            try:
+                anio_id = int(request.form.get("anio_id"))
+                mes = int(request.form.get("mes"))
+            except Exception:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            if mes not in MONTH_LABELS:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            period_rows = get_area_period_rows(area_id)
+            years_map = {row[0]: row for row in period_rows if row[3] is None}
+            anio_row = years_map.get(anio_id)
+            if not anio_row:
+                flash_error(404)
+                return redirect(url_for("archivo"))
+            try:
+                period_id = create_area_period(
+                    area_id,
+                    anio_row[2],
+                    MONTH_LABELS[mes],
+                    mes=mes,
+                    parent_id=anio_id,
+                    creado_por=session.get("usuario_id"),
+                )
+                registrar_log(session.get("usuario_id"), f"CREAR_AREA_MES area_id={area_id} periodo_id={period_id} anio={anio_row[2]} mes={mes}", request.remote_addr, grupo_id)
+                flash("Mes creado correctamente.", "success")
+            except Exception as exc:
+                app.logger.exception("Error creando mes de area")
+                if "UX_area_periodos_area_parent_nombre" in str(exc):
+                    flash_error(400, detail=f"El mes {MONTH_LABELS[mes]} ya existe para ese año.")
+                else:
+                    flash_error(900)
+            return redirect(url_for("archivo"))
+
+        if accion == "agregar_area_registro":
+            try:
+                periodo_id = int(request.form.get("periodo_id"))
+                numero_documento = int(request.form.get("numero_documento"))
+            except Exception:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            nombre_documento = normalizar_nombre((request.form.get("nombre_documento") or "").strip())
+            fecha_documento = parse_fecha_documento(request.form.get("fecha_documento"))
+            tipo_id = (request.form.get("tipo_id") or "").strip().upper()
+            if not nombre_documento or not fecha_documento:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            pdf_path = None
+            file = request.files.get("pdf")
+            if file and file.filename:
+                if not es_pdf(file):
+                    flash_error(407)
+                    return redirect(url_for("archivo"))
+                pdf_path = guardar_pdf_area(file, area_id)
+            record_id = create_area_record(
+                area_id,
+                numero_documento,
+                nombre_documento,
+                fecha_documento,
+                tipo_id=tipo_id,
+                pdf_path=pdf_path,
+                periodo_id=periodo_id,
+                creado_por=session.get("usuario_id"),
+            )
+            registrar_log(session.get("usuario_id"), f"CREAR_AREA_REGISTRO area_id={area_id} registro_id={record_id} numero={numero_documento}", request.remote_addr, grupo_id)
+            flash("Documento agregado al área.", "success")
+            return redirect(url_for("archivo"))
+
+    period_rows = get_area_period_rows(area_id)
+    record_rows = get_area_record_rows(area_id)
+
+    years = []
+    years_map = {}
+    months_map = {}
+    for row in period_rows:
+        if row[3] is None:
+            payload = {"id": row[0], "anio": row[2], "nombre": row[4], "meses": []}
+            years.append(payload)
+            years_map[row[0]] = payload
+        else:
+            payload = {"id": row[0], "anio": row[2], "mes": row[3], "nombre": row[4], "registros": []}
+            months_map[row[0]] = payload
+            if row[5] in years_map:
+                years_map[row[5]]["meses"].append(payload)
+
+    for row in record_rows:
+        registro = {
+            "id": row[0],
+            "numero_documento": row[3],
+            "nombre_documento": row[4],
+            "fecha_documento": row[5],
+            "tipo_id": row[6],
+            "pdf_path": row[7],
+        }
+        if row[2] in months_map:
+            months_map[row[2]]["registros"].append(registro)
+
+    return render_template(
+        "archivo_area_anio_mes.html",
+        area=area,
+        years=years,
+        month_labels=MONTH_LABELS,
+    )
+
+
+def render_area_lista(area, grupo_id):
+    area_id = area[0]
+    search = (request.args.get("buscar_area") or "").strip()
+
+    if request.method == "POST":
+        accion = request.form.get("accion")
+        if accion == "agregar_area_registro_lista":
+            try:
+                numero_documento = int(request.form.get("numero_documento"))
+            except Exception:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            nombre_documento = normalizar_nombre((request.form.get("nombre_documento") or "").strip())
+            fecha_documento = parse_fecha_documento(request.form.get("fecha_documento"))
+            tipo_id = (request.form.get("tipo_id") or "").strip().upper()
+            if not nombre_documento or not fecha_documento:
+                flash_error(400)
+                return redirect(url_for("archivo"))
+            pdf_path = None
+            file = request.files.get("pdf")
+            if file and file.filename:
+                if not es_pdf(file):
+                    flash_error(407)
+                    return redirect(url_for("archivo"))
+                pdf_path = guardar_pdf_area(file, area_id)
+            record_id = create_area_record(
+                area_id,
+                numero_documento,
+                nombre_documento,
+                fecha_documento,
+                tipo_id=tipo_id,
+                pdf_path=pdf_path,
+                periodo_id=None,
+                creado_por=session.get("usuario_id"),
+            )
+            registrar_log(session.get("usuario_id"), f"CREAR_AREA_LISTA area_id={area_id} registro_id={record_id} numero={numero_documento}", request.remote_addr, grupo_id)
+            flash("Documento agregado al área.", "success")
+            return redirect(url_for("archivo"))
+
+    rows = get_area_record_rows(area_id, search=search or None)
+    agrupados = defaultdict(list)
+    for row in rows:
+        agrupados[row[3]].append({
+            "id": row[0],
+            "numero_documento": row[3],
+            "nombre_documento": row[4],
+            "fecha_documento": row[5],
+            "tipo_id": row[6],
+            "pdf_path": row[7],
+        })
+
+    grupos_documento = []
+    for numero, registros in agrupados.items():
+        grupos_documento.append({
+            "numero_documento": numero,
+            "registros": registros,
+        })
+    grupos_documento.sort(key=lambda item: str(item["numero_documento"]))
+
+    return render_template(
+        "archivo_area_lista.html",
+        area=area,
+        grupos_documento=grupos_documento,
+        buscar_area=search,
+    )
 
 
 def crear_reescaneo_pendiente(archivo_id, grupo_id, numero_documento, nombre_documento, tipo_doc, solicitado_por, motivo=""):
@@ -563,6 +1118,9 @@ def inject_csrf_token():
     return {
         "csrf_token": csrf_token,
         "puede_editar_pdf_actual": puede_editar_pdf(),
+        "area_actual": session.get("area_nombre"),
+        "area_tipo_actual": session.get("area_tipo"),
+        "area_label_actual": get_area_label(session.get("area_tipo")),
     }
 
 @app.before_request
@@ -1796,6 +2354,7 @@ def login():
                     puede_editar=True
                 )
                 session["grupo_id"] = grupo_id
+            clear_area_session()
 
             # LOG: LOGIN
             registrar_log(
@@ -1805,7 +2364,7 @@ def login():
                 session.get("grupo_id")
             )
 
-            return redirect(url_for("inicio"))
+            return redirect(url_for("areas"))
         if usuario_existe(usuario):
             flash_error(2)
         else:
@@ -1858,6 +2417,143 @@ def logout():
     return redirect(url_for("login"))
 
 
+# ---------------- AREAS ----------------
+@app.route("/areas", methods=["GET", "POST"])
+def areas():
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    if request.method == "POST":
+        if not admin_requerido():
+            flash_error(200)
+            return redirect(url_for("areas"))
+
+        accion = request.form.get("accion")
+        if accion == "crear_area":
+            nombre = (request.form.get("nombre") or "").strip()
+            tipo = (request.form.get("tipo") or "").strip()
+
+            if not nombre or tipo not in {AREA_TIPO_ANIO_MES, AREA_TIPO_LISTA}:
+                flash_error(400)
+                return redirect(url_for("areas"))
+
+            ensure_areas_tables()
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO areas (grupo_id, nombre, tipo, activa, creada_por)
+                    VALUES (%s, %s, %s, 1, %s)
+                    RETURNING id
+                    """,
+                    (grupo_id, nombre, tipo, session.get("usuario_id"))
+                )
+                area_id = cur.fetchone()[0]
+                conn.commit()
+                registrar_log(
+                    session.get("usuario_id"),
+                    f"CREAR_AREA area_id={area_id} tipo={tipo} nombre={nombre}",
+                    request.remote_addr,
+                    grupo_id
+                )
+                flash("Area creada correctamente.", "success")
+            except Exception as exc:
+                conn.rollback()
+                app.logger.exception("Error creando area")
+                if "UX_areas_grupo_nombre" in str(exc):
+                    flash_error(400, detail=f"Ya existe un area llamada {nombre}.")
+                else:
+                    flash_error(900)
+            finally:
+                cur.close()
+                conn.close()
+            return redirect(url_for("areas"))
+
+    rows = get_areas_by_group(grupo_id)
+    areas_data = [
+        {
+            "id": row[0],
+            "grupo_id": row[1],
+            "nombre": row[2],
+            "tipo": row[3],
+            "tipo_label": get_area_label(row[3]),
+            "activa": bool(row[4]),
+        }
+        for row in rows
+    ]
+    return render_template(
+        "areas.html",
+        areas=areas_data,
+        area_tipos=AREA_TIPOS_CREABLES,
+    )
+
+
+@app.route("/areas/seleccionar/<int:area_id>")
+def seleccionar_area(area_id):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return redirect(url_for("grupos"))
+
+    area = get_area_by_id(area_id, grupo_id=grupo_id)
+    if not area or not area[4]:
+        flash_error(404)
+        return redirect(url_for("areas"))
+
+    set_area_session(area)
+    return redirect(url_for("inicio"))
+
+
+@app.route("/areas/registro/pdf/<int:registro_id>")
+def ver_pdf_area(registro_id):
+    if not login_requerido():
+        return redirect(url_for("login"))
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id or not area_requerida():
+        return redirect(url_for("areas"))
+
+    area = get_current_area(grupo_id=grupo_id)
+    if not area:
+        return redirect(url_for("areas"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT r.pdf_path, r.nombre_documento, r.numero_documento
+        FROM area_registros r
+        INNER JOIN areas a ON a.id = r.area_id
+        WHERE r.id = %s
+          AND r.area_id = %s
+          AND a.grupo_id = %s
+        """,
+        (registro_id, area[0], grupo_id)
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row or not row[0]:
+        flash_error(404, detail="El PDF del area no fue encontrado.")
+        return redirect(url_for("archivo"))
+
+    pdf_path = row[0]
+    abs_path = pdf_path if os.path.isabs(pdf_path) else os.path.join(app.config["AREA_UPLOAD_FOLDER"], pdf_path)
+    if not os.path.exists(abs_path):
+        flash_error(404, detail="El PDF del area no fue encontrado.")
+        return redirect(url_for("archivo"))
+
+    return send_file(abs_path, mimetype="application/pdf")
+
+
 # ---------------- INICIO (BIENVENIDA) ----------------
 @app.route("/inicio")
 def inicio():
@@ -1867,29 +2563,53 @@ def inicio():
     grupo_id = obtener_grupo_id()
     if not grupo_id:
         return redirect(url_for("grupos"))
+    if not area_requerida():
+        return redirect(url_for("areas"))
+
+    area = get_current_area(grupo_id=grupo_id)
+    total_archivos = 0
+    total_cajas = 0
 
     conn = get_db()
     cur = conn.cursor()
+    if area and area[3] == AREA_TIPO_CLASICO:
+        cur.execute(
+            "SELECT COUNT(*) FROM archivos WHERE grupo_id = %s",
+            (grupo_id,)
+        )
+        total_archivos = cur.fetchone()[0]
 
-    cur.execute(
-        "SELECT COUNT(*) FROM archivos WHERE grupo_id = %s",
-        (grupo_id,)
-    )
-    total_archivos = cur.fetchone()[0]
-
-    cur.execute(
-        "SELECT COUNT(*) FROM cajas WHERE grupo_id = %s AND is_pendiente = FALSE",
-        (grupo_id,)
-    )
-    total_cajas = cur.fetchone()[0]
-
+        cur.execute(
+            "SELECT COUNT(*) FROM cajas WHERE grupo_id = %s AND is_pendiente = FALSE",
+            (grupo_id,)
+        )
+        total_cajas = cur.fetchone()[0]
+    else:
+        cur.execute(
+            "SELECT COUNT(*) FROM area_registros WHERE area_id = %s",
+            (area[0],)
+        )
+        total_archivos = cur.fetchone()[0]
+        if area and area[3] == AREA_TIPO_ANIO_MES:
+            cur.execute(
+                "SELECT COUNT(*) FROM area_periodos WHERE area_id = %s AND mes IS NOT NULL",
+                (area[0],)
+            )
+            total_cajas = cur.fetchone()[0]
+        else:
+            cur.execute(
+                "SELECT COUNT(DISTINCT numero_documento) FROM area_registros WHERE area_id = %s",
+                (area[0],)
+            )
+            total_cajas = cur.fetchone()[0]
     cur.close()
     conn.close()
 
     return render_template(
         "inicio.html",
         total_archivos=total_archivos,
-        total_cajas=total_cajas
+        total_cajas=total_cajas,
+        area=area,
     )
 
 
@@ -2336,7 +3056,8 @@ def seleccionar_grupo(grupo_id):
             return "Acceso denegado", 403
 
     session["grupo_id"] = grupo_id
-    return redirect(url_for("archivo"))
+    clear_area_session()
+    return redirect(url_for("areas"))
 
 
 # ---------------- CAJAS ----------------
@@ -2998,6 +3719,15 @@ def archivo():
     grupo_id = obtener_grupo_id()
     if not grupo_id:
         return redirect(url_for("grupos"))
+
+    if not area_requerida():
+        return redirect(url_for("areas"))
+
+    area = get_current_area(grupo_id=grupo_id)
+    if area and area[3] == AREA_TIPO_ANIO_MES:
+        return render_area_anio_mes(area, grupo_id)
+    if area and area[3] == AREA_TIPO_LISTA:
+        return render_area_lista(area, grupo_id)
 
     asegurar_caja_sin_asignar(grupo_id)
     reparar_archivos_huerfanos(grupo_id)
@@ -3959,6 +4689,10 @@ def archivo_caja(caja_id):
     if not grupo_id:
         return redirect(url_for("grupos"))
 
+    area = get_current_area(grupo_id=grupo_id)
+    if area and area[3] != AREA_TIPO_CLASICO:
+        return redirect(url_for("archivo"))
+
     asegurar_caja_sin_asignar(grupo_id)
     reparar_archivos_huerfanos(grupo_id)
 
@@ -4815,7 +5549,8 @@ def admin_abrir_grupo(grupo_id):
         return "Acceso denegado", 403
 
     session["grupo_id"] = grupo_id
-    return redirect(url_for("archivo"))
+    clear_area_session()
+    return redirect(url_for("areas"))
 
 
 # ---------------- ADMIN: MOVIMIENTOS ----------------

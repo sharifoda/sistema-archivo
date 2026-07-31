@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}{{ area[2] }}{% endblock %}
+
+{% block content %}
+<section class="card-panel">
+    <div class="section-heading">
+        <div>
+            <h2>{{ area[2] }}</h2>
+            <p>Area tipo {{ area_label_actual }}. Gestion por años, meses y documentos.</p>
+        </div>
+    </div>
+
+    {% if session.get("rol") == "admin" %}
+    <div class="dashboard-toolbar" style="align-items: end; margin-bottom: 20px; flex-wrap: wrap;">
+        <form method="post" style="display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
+            <input type="hidden" name="accion" value="crear_area_anio">
+            <div>
+                <label for="anio">Año</label>
+                <input id="anio" type="number" name="anio" min="1900" max="2200" required>
+            </div>
+            <button type="submit" class="btn">Crear año</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <section class="card-panel" style="margin-bottom: 24px;">
+        <h3>Agregar documento</h3>
+        <form method="post" enctype="multipart/form-data" class="dashboard-toolbar" style="align-items: end; gap: 14px; flex-wrap: wrap;">
+            <input type="hidden" name="accion" value="agregar_area_registro">
+            <div>
+                <label for="periodo_id">Mes</label>
+                <select id="periodo_id" name="periodo_id" required>
+                    <option value="">Selecciona un mes</option>
+                    {% for year in years %}
+                        {% for month in year.meses %}
+                        <option value="{{ month.id }}">{{ year.anio }} - {{ month.nombre }}</option>
+                        {% endfor %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="numero_documento">Documento</label>
+                <input id="numero_documento" type="number" name="numero_documento" required>
+            </div>
+            <div>
+                <label for="nombre_documento">Nombre</label>
+                <input id="nombre_documento" type="text" name="nombre_documento" required>
+            </div>
+            <div>
+                <label for="fecha_documento">Fecha</label>
+                <input id="fecha_documento" type="date" name="fecha_documento" required>
+            </div>
+            <div>
+                <label for="tipo_id">Tipo ID</label>
+                <input id="tipo_id" type="text" name="tipo_id">
+            </div>
+            <div>
+                <label for="pdf">PDF</label>
+                <input id="pdf" type="file" name="pdf" accept="application/pdf">
+            </div>
+            <button type="submit" class="btn btn-primary">Guardar documento</button>
+        </form>
+    </section>
+
+    {% for year in years %}
+    <section class="card-panel" style="margin-bottom: 24px;">
+        <div class="section-heading">
+            <div>
+                <h3>Año {{ year.anio }}</h3>
+                <p>{{ year.meses|length }} mes(es) creados.</p>
+            </div>
+        </div>
+
+        {% if session.get("rol") == "admin" %}
+        <form method="post" class="dashboard-toolbar" style="align-items:end; gap:12px; margin-bottom:20px;">
+            <input type="hidden" name="accion" value="crear_area_mes">
+            <input type="hidden" name="anio_id" value="{{ year.id }}">
+            <div>
+                <label for="mes_{{ year.id }}">Mes</label>
+                <select id="mes_{{ year.id }}" name="mes" required>
+                    {% for mes_num, mes_nombre in month_labels.items() %}
+                    <option value="{{ mes_num }}">{{ mes_nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn">Crear mes</button>
+        </form>
+        {% endif %}
+
+        {% for month in year.meses %}
+        <article class="card-panel" style="margin-bottom: 16px;">
+            <h4>{{ month.nombre }}</h4>
+            {% if month.registros %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Documento</th>
+                        <th>Nombre</th>
+                        <th>Tipo ID</th>
+                        <th>PDF</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in month.registros %}
+                    <tr>
+                        <td>{{ item.fecha_documento }}</td>
+                        <td>{{ item.numero_documento }}</td>
+                        <td>{{ item.nombre_documento }}</td>
+                        <td>{{ item.tipo_id or "-" }}</td>
+                        <td>
+                            {% if item.pdf_path %}
+                            <a class="btn" href="{{ url_for('ver_pdf_area', registro_id=item.id) }}" target="_blank">Ver PDF</a>
+                            {% else %}
+                            No
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p>No hay documentos cargados en este mes.</p>
+            {% endif %}
+        </article>
+        {% else %}
+        <p>No hay meses creados para este año.</p>
+        {% endfor %}
+    </section>
+    {% else %}
+    <p>No hay años creados en esta area.</p>
+    {% endfor %}
+</section>
+{% endblock %}

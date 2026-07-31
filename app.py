@@ -527,6 +527,8 @@ def create_area_record(area_id, numero_documento, nombre_documento, fecha_docume
 
 def render_area_anio_mes(area, grupo_id):
     area_id = area[0]
+    selected_year_id_raw = request.args.get("anio")
+    selected_month_id_raw = request.args.get("mes")
 
     if request.method == "POST":
         accion = request.form.get("accion")
@@ -598,7 +600,7 @@ def render_area_anio_mes(area, grupo_id):
                     flash_error(400, detail=f"El mes {MONTH_LABELS[mes]} ya existe para ese año.")
                 else:
                     flash_error(900)
-            return redirect(url_for("archivo"))
+            return redirect(url_for("archivo", anio=anio_id))
 
         if accion == "agregar_area_registro":
             try:
@@ -632,7 +634,14 @@ def render_area_anio_mes(area, grupo_id):
             )
             registrar_log(session.get("usuario_id"), f"CREAR_AREA_REGISTRO area_id={area_id} registro_id={record_id} numero={numero_documento}", request.remote_addr, grupo_id)
             flash("Documento agregado al área.", "success")
-            return redirect(url_for("archivo"))
+            redirect_kwargs = {}
+            period_rows = get_area_period_rows(area_id)
+            period_map = {row[0]: row for row in period_rows}
+            selected_month_row = period_map.get(periodo_id)
+            if selected_month_row:
+                redirect_kwargs["anio"] = selected_month_row[5]
+                redirect_kwargs["mes"] = periodo_id
+            return redirect(url_for("archivo", **redirect_kwargs))
 
     period_rows = get_area_period_rows(area_id)
     record_rows = get_area_record_rows(area_id)
@@ -642,11 +651,25 @@ def render_area_anio_mes(area, grupo_id):
     months_map = {}
     for row in period_rows:
         if row[3] is None:
-            payload = {"id": row[0], "anio": row[2], "nombre": row[4], "meses": []}
+            payload = {
+                "id": row[0],
+                "anio": row[2],
+                "nombre": row[4],
+                "meses": [],
+                "total_registros": 0,
+            }
             years.append(payload)
             years_map[row[0]] = payload
         else:
-            payload = {"id": row[0], "anio": row[2], "mes": row[3], "nombre": row[4], "registros": []}
+            payload = {
+                "id": row[0],
+                "anio": row[2],
+                "mes": row[3],
+                "nombre": row[4],
+                "parent_id": row[5],
+                "registros": [],
+                "total_registros": 0,
+            }
             months_map[row[0]] = payload
             if row[5] in years_map:
                 years_map[row[5]]["meses"].append(payload)
@@ -663,11 +686,31 @@ def render_area_anio_mes(area, grupo_id):
         if row[2] in months_map:
             months_map[row[2]]["registros"].append(registro)
 
+    for year in years:
+        year["meses"].sort(key=lambda month: (month["mes"] or 0))
+        for month in year["meses"]:
+            month["total_registros"] = len(month["registros"])
+        year["total_registros"] = sum(month["total_registros"] for month in year["meses"])
+
+    years.sort(key=lambda item: item["anio"], reverse=True)
+
+    selected_year = None
+    if selected_year_id_raw and selected_year_id_raw.isdigit():
+        selected_year = years_map.get(int(selected_year_id_raw))
+
+    selected_month = None
+    if selected_year and selected_month_id_raw and selected_month_id_raw.isdigit():
+        candidate_month = months_map.get(int(selected_month_id_raw))
+        if candidate_month and candidate_month["parent_id"] == selected_year["id"]:
+            selected_month = candidate_month
+
     return render_template(
         "archivo_area_anio_mes.html",
         area=area,
         years=years,
         month_labels=MONTH_LABELS,
+        selected_year=selected_year,
+        selected_month=selected_month,
     )
 
 

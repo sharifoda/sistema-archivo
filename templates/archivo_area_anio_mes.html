@@ -1,138 +1,232 @@
 {% extends "base.html" %}
-
-{% block title %}{{ area[2] }}{% endblock %}
-
 {% block content %}
+
+<style>
+  .area-grid{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+    gap:26px;
+    margin-top:28px;
+  }
+  .area-box{
+    border:3px solid #000;
+    background:#fff;
+    padding:16px;
+    min-height:140px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-decoration:none;
+    color:#000;
+    border-radius:10px;
+  }
+  .area-box.active{
+    border-color:#11c5d9;
+    box-shadow:0 18px 34px rgba(17, 197, 217, 0.18);
+    background:linear-gradient(180deg, rgba(240,250,252,0.96), rgba(255,255,255,0.98));
+  }
+  .area-box .emoji{ font-size:46px; line-height:1; }
+  .area-box .num{ font-size:28px; margin-top:8px; font-weight:bold; }
+  .area-box .meta{ font-size:12px; margin-top:6px; color:#444; text-align:center; }
+  .header-row{
+    display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:14px;
+  }
+  .right-actions{
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  }
+  .btn{
+    padding:10px 14px; border:2px solid #000; background:#fff; cursor:pointer; text-decoration:none; color:#000;
+    border-radius:8px; min-width:110px; text-align:center; display:inline-flex;
+    align-items:center; justify-content:center; box-sizing:border-box; font-size:13px;
+  }
+  .btn-wide{ min-width:150px; }
+  .btn.btn-primary{
+    border-color: transparent;
+    background: linear-gradient(135deg, #0c2d57, #11c5d9);
+    color:#fff;
+  }
+  .toolbar{
+    display:flex; align-items:end; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:22px;
+  }
+  .toolbar form{
+    display:flex; gap:12px; align-items:end; flex-wrap:wrap;
+  }
+  .toolbar input, .toolbar select{
+    width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; box-sizing:border-box;
+  }
+  table{ border-collapse:collapse; width:100%; }
+  th, td{ border:1px solid #c8d6e6; padding:12px; vertical-align:middle; }
+  th{ background:#eef5fb; text-align:left; color:#173b69; }
+  @media (max-width: 1100px) {
+    .area-grid{ grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+  }
+  @media (max-width: 700px) {
+    .area-grid{ grid-template-columns: 1fr; }
+  }
+</style>
+
+<h2 style="margin:0 0 20px;">📁 {{ area[2] }}</h2>
+
+{% if not selected_year %}
 <section class="card-panel">
-    <div class="section-heading">
-        <div>
-            <h2>{{ area[2] }}</h2>
-            <p>Area tipo {{ area_label_actual }}. Gestion por años, meses y documentos.</p>
-        </div>
+  <div class="header-row">
+    <div>
+      <h3 style="margin:0;">📂 Archivo por años</h3>
+      <p style="margin:8px 0 0; color:#555;">Selecciona un año para ver sus meses y documentos.</p>
     </div>
+  </div>
 
-    {% if session.get("rol") == "admin" %}
-    <div class="dashboard-toolbar" style="align-items: end; margin-bottom: 20px; flex-wrap: wrap;">
-        <form method="post" style="display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="accion" value="crear_area_anio">
-            <div>
-                <label for="anio">Año</label>
-                <input id="anio" type="number" name="anio" min="1900" max="2200" required>
-            </div>
-            <button type="submit" class="btn">Crear año</button>
-        </form>
-    </div>
-    {% endif %}
+  {% if session.get("rol") == "admin" %}
+  <div class="toolbar">
+    <form method="post">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="accion" value="crear_area_anio">
+      <div>
+        <label for="anio">Año</label>
+        <input id="anio" type="number" name="anio" min="1900" max="2200" required>
+      </div>
+      <button type="submit" class="btn">Agregar Año</button>
+    </form>
+  </div>
+  {% endif %}
 
-    <section class="card-panel" style="margin-bottom: 24px;">
-        <h3>Agregar documento</h3>
-        <form method="post" enctype="multipart/form-data" class="dashboard-toolbar" style="align-items: end; gap: 14px; flex-wrap: wrap;">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="accion" value="agregar_area_registro">
-            <div>
-                <label for="periodo_id">Mes</label>
-                <select id="periodo_id" name="periodo_id" required>
-                    <option value="">Selecciona un mes</option>
-                    {% for year in years %}
-                        {% for month in year.meses %}
-                        <option value="{{ month.id }}">{{ year.anio }} - {{ month.nombre }}</option>
-                        {% endfor %}
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label for="numero_documento">Documento</label>
-                <input id="numero_documento" type="number" name="numero_documento" required>
-            </div>
-            <div>
-                <label for="nombre_documento">Nombre</label>
-                <input id="nombre_documento" type="text" name="nombre_documento" required>
-            </div>
-            <div>
-                <label for="fecha_documento">Fecha</label>
-                <input id="fecha_documento" type="date" name="fecha_documento" required>
-            </div>
-            <div>
-                <label for="tipo_id">Tipo ID</label>
-                <input id="tipo_id" type="text" name="tipo_id">
-            </div>
-            <div>
-                <label for="pdf">PDF</label>
-                <input id="pdf" type="file" name="pdf" accept="application/pdf">
-            </div>
-            <button type="submit" class="btn btn-primary">Guardar documento</button>
-        </form>
-    </section>
-
+  {% if years %}
+  <div class="area-grid">
     {% for year in years %}
-    <section class="card-panel" style="margin-bottom: 24px;">
-        <div class="section-heading">
-            <div>
-                <h3>Año {{ year.anio }}</h3>
-                <p>{{ year.meses|length }} mes(es) creados.</p>
-            </div>
-        </div>
-
-        {% if session.get("rol") == "admin" %}
-        <form method="post" class="dashboard-toolbar" style="align-items:end; gap:12px; margin-bottom:20px;">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="accion" value="crear_area_mes">
-            <input type="hidden" name="anio_id" value="{{ year.id }}">
-            <div>
-                <label for="mes_{{ year.id }}">Mes</label>
-                <select id="mes_{{ year.id }}" name="mes" required>
-                    {% for mes_num, mes_nombre in month_labels.items() %}
-                    <option value="{{ mes_num }}">{{ mes_nombre }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <button type="submit" class="btn">Crear mes</button>
-        </form>
-        {% endif %}
-
-        {% for month in year.meses %}
-        <article class="card-panel" style="margin-bottom: 16px;">
-            <h4>{{ month.nombre }}</h4>
-            {% if month.registros %}
-            <table>
-                <thead>
-                    <tr>
-                        <th>Fecha</th>
-                        <th>Documento</th>
-                        <th>Nombre</th>
-                        <th>Tipo ID</th>
-                        <th>PDF</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in month.registros %}
-                    <tr>
-                        <td>{{ item.fecha_documento }}</td>
-                        <td>{{ item.numero_documento }}</td>
-                        <td>{{ item.nombre_documento }}</td>
-                        <td>{{ item.tipo_id or "-" }}</td>
-                        <td>
-                            {% if item.pdf_path %}
-                            <a class="btn" href="{{ url_for('ver_pdf_area', registro_id=item.id) }}" target="_blank">Ver PDF</a>
-                            {% else %}
-                            No
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p>No hay documentos cargados en este mes.</p>
-            {% endif %}
-        </article>
-        {% else %}
-        <p>No hay meses creados para este año.</p>
-        {% endfor %}
-    </section>
-    {% else %}
-    <p>No hay años creados en esta area.</p>
+    <a href="{{ url_for('archivo', anio=year.id) }}" class="area-box">
+      <div class="emoji">📦</div>
+      <div class="num">{{ year.anio }}</div>
+      <div class="meta">{{ year.total_registros }} documentos</div>
+    </a>
     {% endfor %}
+  </div>
+  {% else %}
+  <p style="color:#666;">No hay años creados en esta área.</p>
+  {% endif %}
 </section>
+{% else %}
+<section class="card-panel">
+  <div class="header-row">
+    <div>
+      <h2 style="margin:0;">📦 Año {{ selected_year.anio }}</h2>
+      <p style="margin:6px 0 0; color:#555;">Meses creados: <strong>{{ selected_year.meses|length }}</strong> | Documentos: <strong>{{ selected_year.total_registros }}</strong></p>
+    </div>
+    <div class="right-actions">
+      <a class="btn" href="{{ url_for('archivo') }}">⬅️ Atras</a>
+    </div>
+  </div>
+
+  {% if session.get("rol") == "admin" %}
+  <div class="toolbar">
+    <form method="post">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="accion" value="crear_area_mes">
+      <input type="hidden" name="anio_id" value="{{ selected_year.id }}">
+      <div>
+        <label for="mes_{{ selected_year.id }}">Mes</label>
+        <select id="mes_{{ selected_year.id }}" name="mes" required>
+          {% for mes_num, mes_nombre in month_labels.items() %}
+          <option value="{{ mes_num }}">{{ mes_nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn">Agregar Mes</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if selected_year.meses %}
+  <div class="area-grid">
+    {% for month in selected_year.meses %}
+    <a href="{{ url_for('archivo', anio=selected_year.id, mes=month.id) }}" class="area-box {% if selected_month and selected_month.id == month.id %}active{% endif %}">
+      <div class="emoji">🗂️</div>
+      <div class="num" style="font-size:22px;">{{ month.nombre }}</div>
+      <div class="meta">{{ month.total_registros }} documentos</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="color:#666;">No hay meses creados para este año.</p>
+  {% endif %}
+</section>
+
+<section class="card-panel" style="margin-top:24px;">
+  <h3 style="margin-top:0;">Agregar documento</h3>
+  <form method="post" enctype="multipart/form-data" class="toolbar">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="accion" value="agregar_area_registro">
+    <div>
+      <label for="periodo_id">Mes</label>
+      <select id="periodo_id" name="periodo_id" required>
+        <option value="">Selecciona un mes</option>
+        {% for month in selected_year.meses %}
+        <option value="{{ month.id }}" {% if selected_month and selected_month.id == month.id %}selected{% endif %}>{{ month.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="numero_documento">Documento</label>
+      <input id="numero_documento" type="number" name="numero_documento" required>
+    </div>
+    <div>
+      <label for="nombre_documento">Nombre</label>
+      <input id="nombre_documento" type="text" name="nombre_documento" required>
+    </div>
+    <div>
+      <label for="fecha_documento">Fecha</label>
+      <input id="fecha_documento" type="date" name="fecha_documento" required>
+    </div>
+    <div>
+      <label for="tipo_id">Tipo ID</label>
+      <input id="tipo_id" type="text" name="tipo_id">
+    </div>
+    <div>
+      <label for="pdf">PDF</label>
+      <input id="pdf" type="file" name="pdf" accept="application/pdf">
+    </div>
+    <button type="submit" class="btn btn-primary">Guardar documento</button>
+  </form>
+</section>
+
+{% if selected_month %}
+<section class="card-panel" style="margin-top:24px;">
+  <div class="header-row">
+    <div>
+      <h3 style="margin:0;">📄 {{ selected_month.nombre }}</h3>
+      <p style="margin:8px 0 0; color:#555;">{{ selected_month.total_registros }} documento(s)</p>
+    </div>
+  </div>
+
+  {% if selected_month.registros %}
+  <table>
+    <tr>
+      <th>Fecha</th>
+      <th>Documento</th>
+      <th>Nombre</th>
+      <th>Tipo ID</th>
+      <th>PDF</th>
+    </tr>
+    {% for item in selected_month.registros %}
+    <tr>
+      <td>{{ item.fecha_documento }}</td>
+      <td>{{ item.numero_documento }}</td>
+      <td>{{ item.nombre_documento }}</td>
+      <td>{{ item.tipo_id or "-" }}</td>
+      <td>
+        {% if item.pdf_path %}
+        <a class="btn" href="{{ url_for('ver_pdf_area', registro_id=item.id) }}" target="_blank">Ver PDF</a>
+        {% else %}
+        No
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p style="color:#666;">No hay documentos cargados en este mes.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endif %}
 {% endblock %}

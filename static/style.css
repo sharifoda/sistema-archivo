@@ -481,10 +481,157 @@ tr:hover td {
     min-width: 170px;
 }
 
+.area-shell {
+    display: grid;
+    gap: 28px;
+}
+
+.area-hero {
+    padding: 28px 30px 22px;
+    border: 1px solid rgba(17, 197, 217, 0.18);
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(17, 77, 124, 0.06), rgba(38, 191, 211, 0.08));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.area-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border: 1px solid rgba(12, 45, 87, 0.2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    box-shadow: 0 2px 8px rgba(12, 45, 87, 0.05);
+}
+
+.area-hero h2 {
+    margin: 16px 0 12px;
+    font-size: clamp(32px, 3vw, 52px);
+    line-height: 1.05;
+}
+
+.area-hero p {
+    margin: 0;
+    max-width: 860px;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1.7;
+}
+
+.area-create-panel {
+    padding: 18px 20px 22px;
+    border: 1px solid rgba(17, 197, 217, 0.18);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: var(--shadow-soft);
+}
+
+.area-create-panel h3 {
+    margin: 0 0 14px;
+    font-size: 22px;
+}
+
+.area-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 16px;
+}
+
+.field-row {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.field-row label {
+    display: inline-block;
+    margin-bottom: 8px;
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.area-submit {
+    min-width: 160px;
+}
+
+.area-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 26px;
+    align-items: stretch;
+}
+
+.area-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 220px;
+    padding: 22px 18px 18px;
+    border: 3px solid #f6df3e;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: 0 10px 24px rgba(12, 45, 87, 0.08);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.area-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 30px rgba(12, 45, 87, 0.12);
+}
+
+.area-card-top {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.area-card-mark {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border: 2px solid rgba(12, 45, 87, 0.1);
+    border-radius: 12px;
+    background: rgba(17, 197, 217, 0.08);
+    color: var(--primary);
+    font-size: 20px;
+    font-weight: 800;
+}
+
+.area-card h3 {
+    margin: 0;
+    font-size: clamp(20px, 2vw, 28px);
+    line-height: 1.2;
+}
+
+.area-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.area-card-btn {
+    align-self: center;
+    min-width: 150px;
+    margin-top: 18px;
+}
+
 .btn-primary {
     border-color: transparent;
     background: linear-gradient(135deg, var(--primary), var(--accent));
     color: #fff;
+}
+
+.btn-primary:hover {
+    border-color: transparent;
 }
 
 .btn-primary:hover {

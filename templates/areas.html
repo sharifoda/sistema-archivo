@@ -43,7 +43,6 @@
         {% for area in areas %}
         <article class="area-card">
             <div class="area-card-top">
-                <div class="area-card-mark">A</div>
                 <h3>{{ area.nombre }}</h3>
             </div>
             <a class="btn btn-primary area-card-btn" href="{{ url_for('seleccionar_area', area_id=area.id) }}">Entrar</a>

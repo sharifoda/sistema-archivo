@@ -573,10 +573,10 @@ tr:hover td {
     justify-content: space-between;
     min-height: 220px;
     padding: 22px 18px 18px;
-    border: 3px solid #f6df3e;
+    border: 1px solid rgba(17, 197, 217, 0.18);
     border-radius: 18px;
-    background: rgba(255, 255, 255, 0.82);
-    box-shadow: 0 10px 24px rgba(12, 45, 87, 0.08);
+    background: linear-gradient(135deg, rgba(17, 77, 124, 0.06), rgba(38, 191, 211, 0.08));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
     transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -590,19 +590,6 @@ tr:hover td {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
-}
-
-.area-card-mark {
-    width: 42px;
-    height: 42px;
-    display: grid;
-    place-items: center;
-    border: 2px solid rgba(12, 45, 87, 0.1);
-    border-radius: 12px;
-    background: rgba(17, 197, 217, 0.08);
-    color: var(--primary);
-    font-size: 20px;
-    font-weight: 800;
 }
 
 .area-card h3 {

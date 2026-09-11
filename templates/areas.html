@@ -47,15 +47,9 @@
                     <h3>{{ area.nombre }}</h3>
 
                     {% if session.get("rol") in ["admin", "supervisor"] %}
-                    <form method="post" class="area-rename-form" action="{{ url_for('areas') }}">
-                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="accion" value="renombrar_area">
-                        <input type="hidden" name="area_id" value="{{ area.id }}">
-                        <input type="text" name="nombre" value="{{ area.nombre }}" maxlength="255" aria-label="Renombrar área {{ area.nombre }}" class="area-rename-input">
-                        <button type="submit" class="area-rename-btn" aria-label="Renombrar área {{ area.nombre }}" title="Renombrar área">
-                            <span aria-hidden="true">✎</span>
-                        </button>
-                    </form>
+                    <button type="button" class="area-rename-btn" data-area-id="{{ area.id }}" data-area-name="{{ area.nombre }}" aria-label="Renombrar área {{ area.nombre }}" title="Renombrar área">
+                        <span aria-hidden="true">&#9998;</span>
+                    </button>
                     {% endif %}
                 </div>
             </div>
@@ -64,4 +58,74 @@
         {% endfor %}
     </div>
 </section>
+
+{% if session.get("rol") in ["admin", "supervisor"] %}
+<div class="area-modal-overlay" id="areaRenameOverlay" hidden></div>
+<section class="area-rename-modal" id="areaRenameModal" role="dialog" aria-modal="true" aria-labelledby="areaRenameTitle" hidden>
+    <div class="area-rename-modal-header">
+        <h3 id="areaRenameTitle">Renombrar área</h3>
+        <button type="button" class="area-modal-close" id="areaRenameClose" aria-label="Cerrar">&times;</button>
+    </div>
+    <form method="post" action="{{ url_for('areas') }}" id="areaRenameForm">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="accion" value="renombrar_area">
+        <input type="hidden" name="area_id" id="areaRenameId">
+        <label for="areaRenameInput">Nombre</label>
+        <input type="text" name="nombre" id="areaRenameInput" maxlength="255" required autocomplete="off">
+        <div class="area-rename-modal-actions">
+            <button type="button" class="btn" id="areaRenameCancel">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+    </form>
+</section>
+
+<script>
+(function () {
+    const overlay = document.getElementById("areaRenameOverlay");
+    const modal = document.getElementById("areaRenameModal");
+    const form = document.getElementById("areaRenameForm");
+    const input = document.getElementById("areaRenameInput");
+    const areaId = document.getElementById("areaRenameId");
+    const closeButton = document.getElementById("areaRenameClose");
+    const cancelButton = document.getElementById("areaRenameCancel");
+
+    function closeModal() {
+        overlay.hidden = true;
+        modal.hidden = true;
+        document.body.classList.remove("area-modal-open");
+    }
+
+    function openModal(button) {
+        areaId.value = button.dataset.areaId;
+        input.value = button.dataset.areaName;
+        overlay.hidden = false;
+        modal.hidden = false;
+        document.body.classList.add("area-modal-open");
+        input.focus();
+        input.select();
+    }
+
+    document.querySelectorAll(".area-rename-btn[data-area-id]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            openModal(button);
+        });
+    });
+
+    closeButton.addEventListener("click", closeModal);
+    cancelButton.addEventListener("click", closeModal);
+    overlay.addEventListener("click", closeModal);
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && !modal.hidden) {
+            closeModal();
+        }
+    });
+    form.addEventListener("submit", function (event) {
+        if (!input.value.trim()) {
+            event.preventDefault();
+            input.focus();
+        }
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -47,7 +47,7 @@
                     <h3>{{ area.nombre }}</h3>
 
                     {% if session.get("rol") in ["admin", "supervisor"] %}
-                    <button type="button" class="area-rename-btn" data-area-id="{{ area.id }}" data-area-name="{{ area.nombre }}" aria-label="Renombrar área {{ area.nombre }}" title="Renombrar área">
+                    <button type="button" class="area-rename-btn" data-area-id="{{ area.id }}" data-area-name="{{ area.nombre }}" data-area-deletable="{{ 'true' if area.tipo != 'clasico' and area.nombre != 'Papelera' else 'false' }}" aria-label="Renombrar área {{ area.nombre }}" title="Renombrar área">
                         <span aria-hidden="true">&#9998;</span>
                     </button>
                     {% endif %}
@@ -77,6 +77,14 @@
             <button type="submit" class="btn btn-primary">Guardar</button>
         </div>
     </form>
+    {% if session.get("rol") == "admin" %}
+    <form method="post" action="{{ url_for('areas') }}" id="areaDeleteForm" class="area-delete-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="accion" value="eliminar_area">
+        <input type="hidden" name="area_id" id="areaDeleteId">
+        <button type="submit" class="area-delete-btn" id="areaDeleteButton">Eliminar área</button>
+    </form>
+    {% endif %}
 </section>
 
 <script>
@@ -88,6 +96,9 @@
     const areaId = document.getElementById("areaRenameId");
     const closeButton = document.getElementById("areaRenameClose");
     const cancelButton = document.getElementById("areaRenameCancel");
+    const deleteForm = document.getElementById("areaDeleteForm");
+    const deleteButton = document.getElementById("areaDeleteButton");
+    const deleteId = document.getElementById("areaDeleteId");
 
     function closeModal() {
         overlay.hidden = true;
@@ -98,6 +109,10 @@
     function openModal(button) {
         areaId.value = button.dataset.areaId;
         input.value = button.dataset.areaName;
+        if (deleteForm) {
+            deleteId.value = button.dataset.areaId;
+            deleteForm.hidden = button.dataset.areaDeletable !== "true";
+        }
         overlay.hidden = false;
         modal.hidden = false;
         document.body.classList.add("area-modal-open");
@@ -125,6 +140,13 @@
             input.focus();
         }
     });
+    if (deleteForm) {
+        deleteForm.addEventListener("submit", function (event) {
+            if (!window.confirm("¿Eliminar esta área y mover sus documentos a la papelera?")) {
+                event.preventDefault();
+            }
+        });
+    }
 })();
 </script>
 {% endif %}

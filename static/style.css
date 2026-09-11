@@ -707,6 +707,27 @@ tr:hover td {
     margin-top: 22px;
 }
 
+.area-delete-form {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(12, 45, 87, 0.12);
+}
+
+.area-delete-btn {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: #b42318;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.area-delete-btn:hover {
+    color: #8f1d14;
+    text-decoration: underline;
+}
+
 .area-card p {
     margin: 0;
     color: var(--muted);

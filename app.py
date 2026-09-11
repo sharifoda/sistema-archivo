@@ -95,6 +95,7 @@ AREA_TIPOS_CREABLES = (
     (AREA_TIPO_ANIO_MES, "Años y meses"),
     (AREA_TIPO_LISTA, "Listado por documento"),
 )
+AREA_NOMBRE_PAPELERA = "Papelera"
 MONTH_LABELS = {
     1: "Enero",
     2: "Febrero",
@@ -378,9 +379,67 @@ def get_areas_by_group(grupo_id, include_inactive=False):
     params.append(AREA_TIPO_CLASICO)
     cur.execute(sql, tuple(params))
     rows = cur.fetchall()
+
+    if not admin_requerido():
+        rows = [row for row in rows if row[2] != AREA_NOMBRE_PAPELERA]
+    else:
+        rows = [
+            row for row in rows
+            if row[2] != AREA_NOMBRE_PAPELERA or _area_has_records(cur, row[0])
+        ]
+
     cur.close()
     conn.close()
     return rows
+
+
+def _area_has_records(cur, area_id):
+    cur.execute(
+        "SELECT TOP 1 1 FROM area_registros WHERE area_id = %s",
+        (area_id,)
+    )
+    return cur.fetchone() is not None
+
+
+def get_or_create_papelera_area(grupo_id, creado_por=None):
+    ensure_areas_tables()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT TOP 1 id, grupo_id, nombre, tipo, activa
+        FROM areas
+        WHERE grupo_id = %s AND nombre = %s
+        ORDER BY id
+        """,
+        (grupo_id, AREA_NOMBRE_PAPELERA)
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.execute(
+            """
+            INSERT INTO areas (grupo_id, nombre, tipo, activa, creada_por)
+            VALUES (%s, %s, %s, 1, %s)
+            RETURNING id
+            """,
+            (grupo_id, AREA_NOMBRE_PAPELERA, AREA_TIPO_LISTA, creado_por)
+        )
+        area_id = cur.fetchone()[0]
+        cur.execute(
+            "SELECT id, grupo_id, nombre, tipo, activa FROM areas WHERE id = %s",
+            (area_id,)
+        )
+        row = cur.fetchone()
+    elif not row[4]:
+        cur.execute(
+            "UPDATE areas SET activa = 1 WHERE id = %s",
+            (row[0],)
+        )
+        row = (row[0], row[1], row[2], row[3], True)
+    conn.commit()
+    cur.close()
+    conn.close()
+    return row
 
 
 def get_area_by_id(area_id, grupo_id=None):
@@ -396,6 +455,9 @@ def get_area_by_id(area_id, grupo_id=None):
         params.append(grupo_id)
     cur.execute(sql, tuple(params))
     row = cur.fetchone()
+    if row and row[2] == AREA_NOMBRE_PAPELERA:
+        if not admin_requerido() or not _area_has_records(cur, row[0]):
+            row = None
     cur.close()
     conn.close()
     return row
@@ -2477,6 +2539,75 @@ def areas():
                 return redirect(url_for("areas"))
 
         accion = request.form.get("accion")
+        if accion == "eliminar_area":
+            if not admin_requerido():
+                flash_error(200)
+                return redirect(url_for("areas"))
+
+            area_id = request.form.get("area_id", type=int)
+            if not area_id:
+                flash("No se indicó un área válida.", "error")
+                return redirect(url_for("areas"))
+
+            ensure_areas_tables()
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    SELECT id, nombre, tipo, activa
+                    FROM areas
+                    WHERE id = %s AND grupo_id = %s
+                    """,
+                    (area_id, grupo_id)
+                )
+                area = cur.fetchone()
+                if not area or not area[3]:
+                    flash("El área seleccionada no existe.", "error")
+                    return redirect(url_for("areas"))
+                if area[1] == AREA_NOMBRE_PAPELERA or area[2] == AREA_TIPO_CLASICO:
+                    flash("Esta área no se puede eliminar.", "error")
+                    return redirect(url_for("areas"))
+
+                papelera = get_or_create_papelera_area(
+                    grupo_id,
+                    creado_por=session.get("usuario_id")
+                )
+                cur.execute(
+                    """
+                    UPDATE area_registros
+                    SET area_id = %s, periodo_id = NULL
+                    WHERE area_id = %s
+                    """,
+                    (papelera[0], area_id)
+                )
+                documentos_movidos = cur.rowcount or 0
+                cur.execute(
+                    "UPDATE areas SET activa = 0 WHERE id = %s AND grupo_id = %s",
+                    (area_id, grupo_id)
+                )
+                conn.commit()
+                if session.get("area_id") == area_id:
+                    clear_area_session()
+                registrar_log(
+                    session.get("usuario_id"),
+                    f"ELIMINAR_AREA area_id={area_id} papelera_id={papelera[0]} documentos={documentos_movidos}",
+                    request.remote_addr,
+                    grupo_id
+                )
+                flash(
+                    f"Área eliminada. Se enviaron {documentos_movidos} documento(s) a la papelera.",
+                    "success"
+                )
+            except Exception:
+                conn.rollback()
+                app.logger.exception("Error eliminando area")
+                flash("No se pudo eliminar el área.", "error")
+            finally:
+                cur.close()
+                conn.close()
+            return redirect(url_for("areas"))
+
         if accion == "renombrar_area":
             area_id = request.form.get("area_id", type=int)
             nombre = (request.form.get("nombre") or "").strip()

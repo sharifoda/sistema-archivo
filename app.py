@@ -2472,10 +2472,56 @@ def areas():
 
     if request.method == "POST":
         if not admin_requerido():
-            flash_error(200)
-            return redirect(url_for("areas"))
+            if request.form.get("accion") != "renombrar_area" or not supervisor_requerido():
+                flash_error(200)
+                return redirect(url_for("areas"))
 
         accion = request.form.get("accion")
+        if accion == "renombrar_area":
+            area_id = request.form.get("area_id", type=int)
+            nombre = (request.form.get("nombre") or "").strip()
+
+            if not area_id or not nombre:
+                flash("Debes indicar un nombre válido para el área.", "error")
+                return redirect(url_for("areas"))
+
+            ensure_areas_tables()
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT nombre FROM areas WHERE id = %s AND grupo_id = %s AND activa = 1",
+                    (area_id, grupo_id)
+                )
+                area = cur.fetchone()
+                if not area:
+                    flash("El área seleccionada no existe o no pertenece a la empresa actual.", "error")
+                    return redirect(url_for("areas"))
+
+                cur.execute(
+                    "UPDATE areas SET nombre = %s WHERE id = %s AND grupo_id = %s AND activa = 1",
+                    (nombre, area_id, grupo_id)
+                )
+                conn.commit()
+                registrar_log(
+                    session.get("usuario_id"),
+                    f"RENOMBRAR_AREA area_id={area_id} antes={area[0]} despues={nombre}",
+                    request.remote_addr,
+                    grupo_id
+                )
+                flash("Nombre del área actualizado correctamente.", "success")
+            except Exception as exc:
+                conn.rollback()
+                app.logger.exception("Error renombrando area")
+                if "UX_areas_grupo_nombre" in str(exc):
+                    flash_error(400, detail=f"Ya existe un area llamada {nombre}.")
+                else:
+                    flash_error(900)
+            finally:
+                cur.close()
+                conn.close()
+            return redirect(url_for("areas"))
+
         if accion == "crear_area":
             nombre = (request.form.get("nombre") or "").strip()
             tipo = (request.form.get("tipo") or "").strip()

@@ -43,7 +43,21 @@
         {% for area in areas %}
         <article class="area-card">
             <div class="area-card-top">
-                <h3>{{ area.nombre }}</h3>
+                <div class="area-card-header">
+                    <h3>{{ area.nombre }}</h3>
+
+                    {% if session.get("rol") in ["admin", "supervisor"] %}
+                    <form method="post" class="area-rename-form" action="{{ url_for('areas') }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="accion" value="renombrar_area">
+                        <input type="hidden" name="area_id" value="{{ area.id }}">
+                        <input type="text" name="nombre" value="{{ area.nombre }}" maxlength="255" aria-label="Renombrar área {{ area.nombre }}" class="area-rename-input">
+                        <button type="submit" class="area-rename-btn" aria-label="Renombrar área {{ area.nombre }}" title="Renombrar área">
+                            <span aria-hidden="true">✎</span>
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
             </div>
             <a class="btn btn-primary area-card-btn" href="{{ url_for('seleccionar_area', area_id=area.id) }}">Entrar</a>
         </article>

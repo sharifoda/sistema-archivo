@@ -1827,10 +1827,9 @@ def guardar_pdf_expediente(cur, file, archivo_id, grupo_id, usuario_id, numero_e
     cur.execute(
         """
         SELECT id FROM archivo_pdfs
-        WHERE grupo_id = %s AND numero_documento = %s
-          AND fecha_documento = %s AND factura = %s
+                WHERE grupo_id = %s AND factura = %s
         """,
-        (grupo_id, datos["numero"], datos["fecha_documento"], datos["factura"]),
+                (grupo_id, datos["factura"]),
     )
     if cur.fetchone():
         raise ValueError("Este documento ya se encuentra.")
@@ -1868,10 +1867,9 @@ def guardar_pdf_expediente(cur, file, archivo_id, grupo_id, usuario_id, numero_e
         cur.execute(
             """
             SELECT id FROM archivo_pdfs
-            WHERE grupo_id = %s AND numero_documento = %s
-              AND fecha_documento = %s AND factura = %s
+                        WHERE grupo_id = %s AND factura = %s
             """,
-            (grupo_id, datos["numero"], datos["fecha_documento"], datos["factura"]),
+                        (grupo_id, datos["factura"]),
         )
         if cur.fetchone():
             raise ValueError("Este documento ya se encuentra.")

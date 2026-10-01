@@ -19,7 +19,10 @@ const PDF_BULK_DATA = Array.isArray(data.pdfBulkData) ? data.pdfBulkData : [];
 const searchModeControl = document.getElementById("searchMode");
 const searchTextControl = document.getElementById("searchText");
 const searchDateControl = document.getElementById("searchDate");
-if (searchModeControl && searchTextControl && searchDateControl) {
+const searchModeToggle = document.getElementById("searchModeToggle");
+const searchCalendarIcon = document.getElementById("searchCalendarIcon");
+const searchTextIcon = document.getElementById("searchTextIcon");
+if (searchModeControl && searchTextControl && searchDateControl && searchModeToggle) {
   const syncSearchMode = () => {
     const byDate = searchModeControl.value === "fecha";
     searchTextControl.hidden = byDate;
@@ -28,8 +31,16 @@ if (searchModeControl && searchTextControl && searchDateControl) {
     searchDateControl.hidden = !byDate;
     searchDateControl.disabled = !byDate;
     searchDateControl.required = byDate;
+    searchCalendarIcon.hidden = byDate;
+    searchTextIcon.hidden = !byDate;
+    searchModeToggle.setAttribute("aria-label", byDate ? "Volver a buscar por texto" : "Buscar por fecha");
+    searchModeToggle.title = byDate ? "Volver a buscar por texto" : "Buscar por fecha";
   };
-  searchModeControl.addEventListener("change", syncSearchMode);
+  searchModeToggle.addEventListener("click", () => {
+    searchModeControl.value = searchModeControl.value === "fecha" ? "texto" : "fecha";
+    syncSearchMode();
+    (searchModeControl.value === "fecha" ? searchDateControl : searchTextControl).focus();
+  });
   syncSearchMode();
 }
 

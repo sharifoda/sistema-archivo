@@ -6,8 +6,21 @@
     display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px;
   }
   .topbar .left, .topbar .center, .topbar .right{ flex:1; }
-  .topbar .center{ display:flex; justify-content:center; gap:10px; align-items:center; }
+  .topbar .center{ display:flex; justify-content:center; gap:10px; align-items:center; min-width:0; }
   .topbar .right{ text-align:right; }
+
+  .search-form{ display:flex; width:100%; max-width:470px; gap:8px; align-items:center; flex-wrap:nowrap; }
+  .search-input-wrap{ position:relative; flex:1 1 300px; min-width:0; }
+  .search-field{ box-sizing:border-box; width:100%; min-width:0; padding-right:48px; text-align:left; }
+  .search-mode-toggle{
+    position:absolute; top:50%; right:5px; transform:translateY(-50%);
+    display:grid; place-items:center; width:36px; height:36px; min-width:36px;
+    padding:0; border:0; border-radius:6px; background:transparent; color:#0c2d57; cursor:pointer;
+  }
+  .search-mode-toggle:hover{ background:rgba(17, 197, 217, .12); }
+  .search-mode-toggle svg{ width:19px; height:19px; }
+  .search-mode-toggle span{ font-size:13px; font-weight:700; }
+  .search-input-wrap [hidden]{ display:none !important; }
 
   .btn{
     padding:10px 14px; border:2px solid #000; background:#fff; cursor:pointer;
@@ -576,13 +589,19 @@
   </div>
 
   <div class="center">
-    <form id="searchForm" method="get" action="{{ url_for('archivo') }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-      <select id="searchMode" name="modo_busqueda" aria-label="Tipo de búsqueda" style="width:150px;">
-        <option value="texto" {% if modo_busqueda != 'fecha' %}selected{% endif %}>Texto / factura</option>
-        <option value="fecha" {% if modo_busqueda == 'fecha' %}selected{% endif %}>Fecha PDF</option>
-      </select>
-      <input id="searchText" class="btn" style="min-width:0; width:min(360px, 32vw); text-align:left;" type="text" name="buscar" placeholder="Cédula, nombre o factura" value="{{ buscar_raw }}">
-      <input id="searchDate" class="btn" style="min-width:0; width:180px;" type="date" name="fecha" value="{{ fecha_busqueda }}" hidden disabled>
+    <form id="searchForm" class="search-form" method="get" action="{{ url_for('archivo') }}">
+      <input id="searchMode" type="hidden" name="modo_busqueda" value="{{ modo_busqueda }}">
+      <div class="search-input-wrap">
+        <input id="searchText" class="btn search-field" type="text" name="buscar" placeholder="Cédula, nombre o factura" value="{{ buscar_raw }}" {% if modo_busqueda == 'fecha' %}hidden disabled{% else %}required{% endif %}>
+        <input id="searchDate" class="btn search-field" type="date" name="fecha" value="{{ fecha_busqueda }}" {% if modo_busqueda != 'fecha' %}hidden disabled{% else %}required{% endif %}>
+        <button id="searchModeToggle" class="search-mode-toggle" type="button" aria-label="Buscar por fecha" title="Buscar por fecha">
+          <svg id="searchCalendarIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {% if modo_busqueda == 'fecha' %}hidden{% endif %}>
+            <rect x="3" y="5" width="18" height="16" rx="2"></rect>
+            <path d="M16 3v4M8 3v4M3 11h18"></path>
+          </svg>
+          <span id="searchTextIcon" aria-hidden="true" {% if modo_busqueda != 'fecha' %}hidden{% endif %}>Aa</span>
+        </button>
+      </div>
       <button class="btn" style="min-width:auto;" type="submit">Buscar</button>
     </form>
   </div>

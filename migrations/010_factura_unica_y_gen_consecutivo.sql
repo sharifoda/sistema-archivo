@@ -26,8 +26,10 @@ END;
     WHERE fecha_documento = @fecha_legacy
       AND factura = 'GEN0001'
 )
-UPDATE pdfs_legacy
-SET factura = 'GEN' + RIGHT('0000' + CONVERT(VARCHAR(4), consecutivo), 4);
+UPDATE pdf
+SET factura = 'GEN' + RIGHT('0000' + CONVERT(VARCHAR(4), legacy.consecutivo), 4)
+FROM dbo.archivo_pdfs pdf
+JOIN pdfs_legacy legacy ON legacy.id = pdf.id;
 
 IF EXISTS (
     SELECT empresa, factura

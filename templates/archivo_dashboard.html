@@ -576,8 +576,13 @@
   </div>
 
   <div class="center">
-    <form method="get" action="{{ url_for('archivo') }}" style="display:flex; gap:10px; align-items:center;">
-      <input class="btn" style="min-width:360px; text-align:left;" type="text" name="buscar" placeholder="Buscar documento o nombre" required>
+    <form id="searchForm" method="get" action="{{ url_for('archivo') }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <select id="searchMode" name="modo_busqueda" aria-label="Tipo de búsqueda" style="width:150px;">
+        <option value="texto" {% if modo_busqueda != 'fecha' %}selected{% endif %}>Texto / factura</option>
+        <option value="fecha" {% if modo_busqueda == 'fecha' %}selected{% endif %}>Fecha PDF</option>
+      </select>
+      <input id="searchText" class="btn" style="min-width:0; width:min(360px, 32vw); text-align:left;" type="text" name="buscar" placeholder="Cédula, nombre o factura" value="{{ buscar_raw }}">
+      <input id="searchDate" class="btn" style="min-width:0; width:180px;" type="date" name="fecha" value="{{ fecha_busqueda }}" hidden disabled>
       <button class="btn" style="min-width:auto;" type="submit">Buscar</button>
     </form>
   </div>
@@ -870,6 +875,7 @@
        "importCloseUrl": url_for("importacion_cerrar"),
        "importJob": import_job,
        "resultado":   resultado,
+      "searchMode": modo_busqueda,
        "csrfToken":   csrf_token(),
        "excelBoxData": excel_box_data,
        "pdfBulkData": pdf_bulk_data

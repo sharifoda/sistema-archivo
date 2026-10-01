@@ -11,9 +11,28 @@ const IMPORT_REPORT_URL_BASE = data.importReportUrlBase || "";
 const IMPORT_CLOSE_URL = data.importCloseUrl || "";
 const IMPORT_JOB = data.importJob || null;
 const resultado     = data.resultado;
+const SEARCH_MODE = data.searchMode || "texto";
 const csrfToken     = data.csrfToken || "";
 const EXCEL_BOX_DATA = Array.isArray(data.excelBoxData) ? data.excelBoxData : [];
 const PDF_BULK_DATA = Array.isArray(data.pdfBulkData) ? data.pdfBulkData : [];
+
+const searchModeControl = document.getElementById("searchMode");
+const searchTextControl = document.getElementById("searchText");
+const searchDateControl = document.getElementById("searchDate");
+if (searchModeControl && searchTextControl && searchDateControl) {
+  const syncSearchMode = () => {
+    const byDate = searchModeControl.value === "fecha";
+    searchTextControl.hidden = byDate;
+    searchTextControl.disabled = byDate;
+    searchTextControl.required = !byDate;
+    searchDateControl.hidden = !byDate;
+    searchDateControl.disabled = !byDate;
+    searchDateControl.required = byDate;
+  };
+  searchModeControl.addEventListener("change", syncSearchMode);
+  syncSearchMode();
+}
+
 let importStatusTimer = null;
 let importLastInserted = IMPORT_JOB && Number.isFinite(Number(IMPORT_JOB.inserted)) ? Number(IMPORT_JOB.inserted) : 0;
 let importCurrentJob = IMPORT_JOB || null;
@@ -886,7 +905,7 @@ if (resultado) {
   // No encontrado
   } else if (resultado[0] === "no") {
     cont.innerHTML =
-      `<p style="color:#b00020;">❌ No se encontró ningún archivo con ese documento.</p>`;
+      `<p style="color:#b00020;">❌ No se encontraron resultados con esos criterios.</p>`;
 
   // Resultado OK
   } else {
@@ -900,14 +919,22 @@ if (resultado) {
           const doc = row[3];
           const nombre = row[4];
           const pdf = row.length > 5 ? row[5] : null;
+          const factura = row[6] || "";
+          const fechaPdf = row[7] || "";
           const nombreAttr = escapeAttr(nombre || "");
+          const facturaAttr = escapeAttr(factura);
+          const fechaAttr = escapeAttr(fechaPdf);
+          const fechaLabel = fechaPdf ? String(fechaPdf).split("-").reverse().join("/") : "";
 
           const cajaTxt =
             cajaNum === 0 ? "<strong>0</strong> (Pendiente)" : cajaNum;
           const irCajaUrl = buildCajaUrl(cajaId, doc);
+          const pdfTargetAttrs = SEARCH_MODE === "fecha"
+            ? `data-factura="${facturaAttr}" data-fecha="${fechaAttr}"`
+            : "";
           const pdfLink = pdf
             ? `<button type="button" class="btn-small"
-                 data-numero="${doc}" data-nombre="${nombreAttr}"
+                 data-numero="${doc}" data-nombre="${nombreAttr}" ${pdfTargetAttrs}
                  onclick="abrirPdfModal(this)">Ver PDF</button>`
             : `<button type="button" class="btn-small btn-disabled"
                  onclick="alert('Este documento no tiene PDF.');">
@@ -920,6 +947,7 @@ if (resultado) {
               <td>${tipoDoc || ""}</td>
               <td>${formatMiles(doc)}</td>
               <td>${String(nombre || "").toUpperCase()}</td>
+              ${SEARCH_MODE === "fecha" ? `<td>${facturaAttr}</td><td>${fechaLabel}</td>` : ""}
               <td>${pdf ? "Si" : "No"}</td>
               <td>
                 <div class="acciones-cell">
@@ -962,6 +990,7 @@ if (resultado) {
             <th>Tipo</th>
             <th>Documento</th>
             <th>Nombre</th>
+            ${SEARCH_MODE === "fecha" ? "<th>Factura</th><th>Fecha PDF</th>" : ""}
             <th>PDF</th>
             <th>Accion</th>
           </tr>

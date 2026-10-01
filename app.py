@@ -3887,9 +3887,18 @@ def archivos_legacy():
                   FROM archivos a
                 JOIN cajas c ON c.id = a.caja_id
                 LEFT JOIN ranked r ON r.id = c.id
-                WHERE a.nombre ILIKE %s AND a.grupo_id = %s
+                                WHERE a.grupo_id = %s
+                                    AND (
+                                        a.nombre ILIKE %s
+                                        OR EXISTS (
+                                                SELECT 1 FROM archivo_pdfs p
+                                                WHERE p.archivo_id = a.id
+                                                    AND p.grupo_id = a.grupo_id
+                                                    AND p.factura ILIKE %s
+                                        )
+                                    )
                 ORDER BY a.numero
-            """, (grupo_id, f"%{buscar}%", grupo_id))
+                        """, (grupo_id, grupo_id, f"%{buscar}%", f"%{buscar}%"))
             rows = cur.fetchall()
             if rows:
                 resultado = rows_to_builtin(rows)
@@ -4818,7 +4827,51 @@ def archivo():
     # GET: buscador + listado de cajas
     # =========================================================
     resultado = None
+    modo_busqueda = request.args.get("modo_busqueda", "texto")
+    if modo_busqueda not in ("texto", "fecha"):
+        modo_busqueda = "texto"
+    fecha_busqueda = request.args.get("fecha", "").strip()
     buscar_raw = request.args.get("buscar", "").strip()
+
+    if modo_busqueda == "fecha":
+        buscar_raw = ""
+        if fecha_busqueda:
+            try:
+                fecha_documento = datetime.strptime(fecha_busqueda, "%Y-%m-%d").date()
+            except ValueError:
+                resultado = ("no",)
+            else:
+                conn = get_db()
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    WITH ranked AS (
+                        SELECT id, ROW_NUMBER() OVER (ORDER BY rango_min, id) AS caja_visible
+                        FROM cajas
+                        WHERE grupo_id = %s AND is_pendiente = FALSE
+                    )
+                    SELECT
+                        c.id AS caja_id,
+                        CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
+                        a.tipo_doc AS tipo_doc,
+                        a.numero AS documento,
+                        a.nombre AS nombre,
+                        1 AS pdf_path,
+                        p.factura,
+                        CONVERT(VARCHAR(10), p.fecha_documento, 23) AS fecha_pdf
+                    FROM archivo_pdfs p
+                    JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+                    JOIN cajas c ON c.id = a.caja_id
+                    LEFT JOIN ranked r ON r.id = c.id
+                    WHERE p.grupo_id = %s AND p.fecha_documento = %s
+                    ORDER BY p.fecha_documento DESC, p.factura DESC, p.id DESC
+                    """,
+                    (grupo_id, grupo_id, fecha_documento),
+                )
+                rows = cur.fetchall()
+                cur.close()
+                conn.close()
+                resultado = rows_to_builtin(rows) if rows else ("no",)
 
     if buscar_raw:
         conn = get_db()
@@ -4907,9 +4960,18 @@ def archivo():
                 FROM archivos a
                     JOIN cajas c ON c.id = a.caja_id
                     LEFT JOIN ranked r ON r.id = c.id
-                    WHERE a.nombre ILIKE %s AND a.grupo_id = %s
+                                        WHERE a.grupo_id = %s
+                                            AND (
+                                                a.nombre ILIKE %s
+                                                OR EXISTS (
+                                                        SELECT 1 FROM archivo_pdfs p
+                                                        WHERE p.archivo_id = a.id
+                                                            AND p.grupo_id = a.grupo_id
+                                                            AND p.factura ILIKE %s
+                                                )
+                                            )
                     ORDER BY a.numero
-                """, (grupo_id, f"%{buscar_raw}%", grupo_id))
+                                """, (grupo_id, grupo_id, f"%{buscar_raw}%", f"%{buscar_raw}%"))
                 rows = cur.fetchall()
                 if rows:
                     resultado = rows_to_builtin(rows)
@@ -5004,6 +5066,9 @@ def archivo():
         "archivo_dashboard.html",
         cajas=cajas,
         resultado=resultado,
+        modo_busqueda=modo_busqueda,
+        fecha_busqueda=fecha_busqueda,
+        buscar_raw=buscar_raw,
         archivador_mode=archivador_mode,
         excel_box_data=excel_box_data,
         pdf_bulk_data=pdf_bulk_data,

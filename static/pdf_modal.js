@@ -269,6 +269,8 @@
   window.abrirPdfModal = function(btn){
     const numero = Number(btn.dataset.numero);
     const nombre = btn.dataset.nombre || "";
+    const factura = btn.dataset.factura || "";
+    const fecha = btn.dataset.fecha || "";
     if (!numero) return;
     fetch(buildPdfListUrl(numero), { cache: "no-store" })
       .then((response) => {
@@ -281,9 +283,10 @@
           alert("Este documento no tiene PDF.");
           return;
         }
+        const seleccionado = pdfs.find((item) => item.factura === factura && item.fecha === fecha) || pdfs[0];
         show("pdfModalOverlay");
         show("pdfModal");
-        return openPdfModalFromNumero(numero, nombre, pdfs[0].id, pdfs);
+        return openPdfModalFromNumero(numero, nombre, seleccionado.id, pdfs);
       })
       .catch(() => {
         alert("No se pudo cargar la lista de PDFs.");

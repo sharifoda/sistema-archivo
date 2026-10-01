@@ -21,7 +21,6 @@ const searchTextControl = document.getElementById("searchText");
 const searchDateControl = document.getElementById("searchDate");
 const searchModeToggle = document.getElementById("searchModeToggle");
 const searchCalendarIcon = document.getElementById("searchCalendarIcon");
-const searchTextIcon = document.getElementById("searchTextIcon");
 if (searchModeControl && searchTextControl && searchDateControl && searchModeToggle) {
   const syncSearchMode = () => {
     const byDate = searchModeControl.value === "fecha";
@@ -31,8 +30,8 @@ if (searchModeControl && searchTextControl && searchDateControl && searchModeTog
     searchDateControl.hidden = !byDate;
     searchDateControl.disabled = !byDate;
     searchDateControl.required = byDate;
-    searchCalendarIcon.hidden = byDate;
-    searchTextIcon.hidden = !byDate;
+    searchCalendarIcon.hidden = false;
+    searchModeToggle.classList.toggle("is-date-mode", byDate);
     searchModeToggle.setAttribute("aria-label", byDate ? "Volver a buscar por texto" : "Buscar por fecha");
     searchModeToggle.title = byDate ? "Volver a buscar por texto" : "Buscar por fecha";
   };

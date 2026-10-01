@@ -16,10 +16,13 @@
     position:absolute; top:50%; right:5px; transform:translateY(-50%);
     display:grid; place-items:center; width:36px; height:36px; min-width:36px;
     padding:0; border:0; border-radius:6px; background:transparent; color:#0c2d57; cursor:pointer;
+    transition:none; animation:none;
   }
-  .search-mode-toggle:hover{ background:rgba(17, 197, 217, .12); }
+  .search-mode-toggle:hover,
+  .search-mode-toggle:active{ transform:translateY(-50%); background:transparent; }
+  .search-mode-toggle:focus-visible{ outline:2px solid #11c5d9; outline-offset:1px; }
   .search-mode-toggle svg{ width:19px; height:19px; }
-  .search-mode-toggle span{ font-size:13px; font-weight:700; }
+  .search-mode-toggle.is-date-mode svg{ visibility:hidden; }
   .search-input-wrap [hidden]{ display:none !important; }
 
   .btn{
@@ -599,7 +602,6 @@
             <rect x="3" y="5" width="18" height="16" rx="2"></rect>
             <path d="M16 3v4M8 3v4M3 11h18"></path>
           </svg>
-          <span id="searchTextIcon" aria-hidden="true" {% if modo_busqueda != 'fecha' %}hidden{% endif %}>Aa</span>
         </button>
       </div>
       <button class="btn" style="min-width:auto;" type="submit">Buscar</button>

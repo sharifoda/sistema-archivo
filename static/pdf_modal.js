@@ -2,6 +2,7 @@
   const dataEl = document.getElementById("pdf-modal-data");
   if (!dataEl) return;
 
+  const URL_LIST_BASE = dataEl.dataset.urlListBase || "";
   const URL_PDF_BASE = dataEl.dataset.urlBase || "";
   const URL_PAGES_BASE = dataEl.dataset.urlPages || "";
   const URL_DELETE_PAGES_BASE = dataEl.dataset.urlDeletePages || "";
@@ -11,7 +12,9 @@
 
   let pdfDoc = null;
   let currentNumero = null;
+  let currentCedula = null;
   let currentNombre = "";
+  let currentPdfList = [];
   let selectedPages = new Set();
   let pageOrder = [];
   let originalPageOrder = [];
@@ -23,6 +26,10 @@
     if (!fresh) return base;
     const sep = base.includes("?") ? "&" : "?";
     return base + sep + "v=" + Date.now();
+  }
+
+  function buildPdfListUrl(numero){
+    return URL_LIST_BASE.replace("/0", "/" + String(numero));
   }
 
   function buildPagesUrl(numero, pages, download){
@@ -207,22 +214,49 @@
     actions.style.display = selectedPages.size > 0 ? "flex" : "none";
   }
 
-  async function openPdfModalFromNumero(numero, nombre){
+  function renderPdfList(numero, nombre, pdfs, selectedId){
+    const list = document.getElementById("pdfDocumentList");
+    if (!list) return;
+    list.innerHTML = "";
+    pdfs.forEach((item) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "pdf-document-option" + (item.id === selectedId ? " active" : "");
+      const title = document.createElement("strong");
+      title.textContent = item.factura;
+      const detail = document.createElement("span");
+      const date = new Date(item.fecha + "T00:00:00").toLocaleDateString("es-CO");
+      detail.textContent = date + " · " + (nombre || ("Cédula " + numero));
+      option.appendChild(title);
+      option.appendChild(detail);
+      option.addEventListener("click", () => {
+        openPdfModalFromNumero(numero, nombre, item.id, pdfs).catch(() => {
+          alert("No se pudo cargar el PDF.");
+        });
+      });
+      list.appendChild(option);
+    });
+  }
+
+  async function openPdfModalFromNumero(numero, nombre, pdfId, pdfs){
     if (!window.pdfjsLib){
       alert("No se pudo cargar el visor de PDF.");
       return;
     }
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    currentNumero = numero;
+    currentNumero = pdfId;
+    currentCedula = numero;
     currentNombre = nombre || "";
+    currentPdfList = pdfs || currentPdfList;
     thumbCache = new Map();
     selectedPages.clear();
 
-    document.getElementById("pdfModalTitle").innerText = "PDF";
-    document.getElementById("pdfModalSub").innerText = currentNombre ? ("Documento: " + currentNombre) : "";
+    document.getElementById("pdfModalTitle").innerText = "Documentos PDF";
+    document.getElementById("pdfModalSub").innerText = "Cédula: " + String(currentCedula);
+    renderPdfList(currentCedula, currentNombre, currentPdfList, currentNumero);
 
-    const url = buildPdfUrl(numero, true);
+    const url = buildPdfUrl(pdfId, true);
     pdfDoc = await pdfjsLib.getDocument(url).promise;
     pageOrder = Array.from({ length: pdfDoc.numPages }, (_, idx) => idx + 1);
     originalPageOrder = [...pageOrder];
@@ -236,9 +270,24 @@
     const numero = Number(btn.dataset.numero);
     const nombre = btn.dataset.nombre || "";
     if (!numero) return;
-    openPdfModalFromNumero(numero, nombre).catch(() => {
-      alert("No se pudo cargar el PDF.");
-    });
+    fetch(buildPdfListUrl(numero), { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("No se pudo cargar la lista.");
+        return response.json();
+      })
+      .then((payload) => {
+        const pdfs = Array.isArray(payload.pdfs) ? payload.pdfs : [];
+        if (!pdfs.length) {
+          alert("Este documento no tiene PDF.");
+          return;
+        }
+        show("pdfModalOverlay");
+        show("pdfModal");
+        return openPdfModalFromNumero(numero, nombre, pdfs[0].id, pdfs);
+      })
+      .catch(() => {
+        alert("No se pudo cargar la lista de PDFs.");
+      });
   };
 
   window.cerrarPdfModal = function(){
@@ -296,7 +345,7 @@
       }
 
       alert(payload.message || "Orden guardado correctamente.");
-      await openPdfModalFromNumero(currentNumero, currentNombre);
+      await openPdfModalFromNumero(currentCedula, currentNombre, currentNumero, currentPdfList);
     } catch (error) {
       console.error("No se pudo guardar el orden del PDF", error);
       alert("No se pudo guardar el nuevo orden del PDF.");
@@ -307,7 +356,7 @@
     if (!CAN_DELETE_PAGES || !currentNumero || selectedPages.size === 0) return;
     const pages = Array.from(selectedPages).sort((a,b)=>a-b);
     const ok = window.confirm(
-      "Se eliminarán de forma permanente las paginas seleccionadas del PDF. Esta accion no se puede deshacer.\n\nPaginas: " + pages.join(", ")
+      "Se eliminarán de forma permanente las páginas seleccionadas del PDF. Esta acción no se puede deshacer.\n\nPáginas: " + pages.join(", ")
     );
     if (!ok) return;
 
@@ -328,15 +377,15 @@
 
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
-        alert(payload?.error || "No se pudieron eliminar las paginas seleccionadas.");
+        alert(payload?.error || "No se pudieron eliminar las páginas seleccionadas.");
         return;
       }
 
-      alert(payload.message || "Paginas eliminadas correctamente.");
-      await openPdfModalFromNumero(currentNumero, currentNombre);
+      alert(payload.message || "Páginas eliminadas correctamente.");
+      await openPdfModalFromNumero(currentCedula, currentNombre, currentNumero, currentPdfList);
     } catch (error) {
-      console.error("No se pudieron eliminar las paginas", error);
-      alert("No se pudieron eliminar las paginas seleccionadas.");
+      console.error("No se pudieron eliminar las páginas", error);
+      alert("No se pudieron eliminar las páginas seleccionadas.");
     }
   };
 

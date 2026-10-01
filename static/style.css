@@ -942,8 +942,57 @@ tr:hover td {
     height: calc(80vh - 120px);
 }
 
+.pdf-modal-side {
+    width: 45%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pdf-document-list {
+    max-height: 34%;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.94);
+}
+
+.pdf-document-option {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--primary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.pdf-document-option:hover,
+.pdf-document-option.active {
+    border-color: var(--line);
+    background: #edf7f9;
+}
+
+.pdf-document-option strong,
+.pdf-document-option span {
+    display: block;
+}
+
+.pdf-document-option span {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
 .pdf-thumbs {
     flex: 1;
+    min-height: 0;
     overflow: auto;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -1001,7 +1050,7 @@ tr:hover td {
 }
 
 .pdf-preview {
-    width: 45%;
+    width: 55%;
     border: 1px solid var(--line);
     border-radius: 16px;
     display: flex;
@@ -1067,6 +1116,11 @@ tr:hover td {
     .pdf-modal-body {
         flex-direction: column;
         height: auto;
+    }
+
+    .pdf-modal-side {
+        width: 100%;
+        height: 42vh;
     }
 
     .pdf-preview {

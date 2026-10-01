@@ -1789,6 +1789,96 @@ def obtener_nombre_original_pdf(filename):
     return base
 
 
+def parsear_nombre_pdf_expediente(filename):
+    if not filename:
+        return None
+    base = os.path.basename(filename)
+    nombre, ext = os.path.splitext(base)
+    if ext.lower() != ".pdf":
+        return None
+    nombre = re.sub(r"^\d{4}_", "", nombre)
+    match = re.fullmatch(
+        r"([0-9]+)[\s_-]+([0-9]{8})[\s_-]+([A-Z]{2}[0-9]{5}|[A-Z]{3}[0-9]{4}|[A-Z]{4}[0-9]{4})",
+        nombre,
+    )
+    if not match:
+        return None
+    try:
+        fecha = datetime.strptime(match.group(2), "%Y%m%d").date()
+    except ValueError:
+        return None
+    return {
+        "numero": int(match.group(1)),
+        "fecha_documento": fecha,
+        "factura": match.group(3),
+    }
+
+
+def guardar_pdf_expediente(cur, file, archivo_id, grupo_id, usuario_id, numero_esperado):
+    datos = parsear_nombre_pdf_expediente(file.filename)
+    if not datos:
+        raise ValueError(
+            "Nombre inválido. Usa cédula - AAAAMMDD - factura.pdf; la factura debe tener "
+            "2 letras + 5 dígitos, 3 letras + 4 dígitos o 4 letras + 4 dígitos."
+        )
+    if datos["numero"] != int(numero_esperado):
+        raise ValueError("La cédula del nombre del PDF no coincide con el documento.")
+
+    cur.execute(
+        """
+        SELECT id FROM archivo_pdfs
+        WHERE grupo_id = %s AND numero_documento = %s
+          AND fecha_documento = %s AND factura = %s
+        """,
+        (grupo_id, datos["numero"], datos["fecha_documento"], datos["factura"]),
+    )
+    if cur.fetchone():
+        raise ValueError("Este documento ya se encuentra.")
+
+    pdf_path = f"exp_{grupo_id}_{uuid.uuid4().hex}.pdf"
+    full_path = os.path.join(app.config["UPLOAD_FOLDER"], pdf_path)
+    file.stream.seek(0)
+    file.save(full_path)
+    try:
+        cur.execute(
+            """
+            INSERT INTO archivo_pdfs (
+                archivo_id, grupo_id, numero_documento, fecha_documento,
+                factura, pdf_path, creado_por
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                archivo_id,
+                grupo_id,
+                datos["numero"],
+                datos["fecha_documento"],
+                datos["factura"],
+                pdf_path,
+                usuario_id,
+            ),
+        )
+        pdf_id = cur.fetchone()[0]
+    except Exception:
+        try:
+            os.remove(full_path)
+        except OSError:
+            pass
+        cur.execute(
+            """
+            SELECT id FROM archivo_pdfs
+            WHERE grupo_id = %s AND numero_documento = %s
+              AND fecha_documento = %s AND factura = %s
+            """,
+            (grupo_id, datos["numero"], datos["fecha_documento"], datos["factura"]),
+        )
+        if cur.fetchone():
+            raise ValueError("Este documento ya se encuentra.")
+        raise
+    return pdf_id, pdf_path, datos
+
+
 def login_requerido():
     return "usuario" in session
 
@@ -2232,10 +2322,18 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 )
                 continue
 
-            numero = obtener_numero_desde_nombre_pdf(filename)
-            if numero is None:
+            datos_pdf = parsear_nombre_pdf_expediente(display_name or filename)
+            if datos_pdf is None:
                 invalidos += 1
-                add_invalid_detail(invalid_details, display_name or filename, reason="nombre de archivo invalido")
+                add_invalid_detail(
+                    invalid_details,
+                    display_name or filename,
+                    reason=(
+                        "Nombre inválido. Usa cédula - AAAAMMDD - factura.pdf; "
+                        "la factura debe tener 2 letras + 5 dígitos, 3 letras + 4 dígitos "
+                        "o 4 letras + 4 dígitos."
+                    ),
+                )
                 set_import_job(
                     job_id,
                     processed_rows=procesados,
@@ -2248,8 +2346,10 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 )
                 continue
 
+            numero = datos_pdf["numero"]
+
             cur.execute(
-                "SELECT id, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
+                "SELECT id FROM archivos WHERE numero = %s AND grupo_id = %s",
                 (numero, grupo_id)
             )
             row = cur.fetchone()
@@ -2268,7 +2368,7 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                 )
                 continue
 
-            archivo_id, pdf_old = row
+            archivo_id = row[0]
 
             try:
                 with open(abs_path, "rb") as fh:
@@ -2300,32 +2400,21 @@ def importar_pdf_job(job_dir, file_names, grupo_id, usuario_id, job_id, client_i
                     self.stream.seek(0)
 
             file_obj = StoredUpload(display_name or filename, pdf_bytes)
+            try:
+                guardar_pdf_expediente(
+                    cur,
+                    file_obj,
+                    archivo_id,
+                    grupo_id,
+                    usuario_id,
+                    numero,
+                )
+            except ValueError as exc:
+                invalidos += 1
+                add_invalid_detail(invalid_details, display_name or filename, reason=str(exc))
+                continue
+            cargados += 1
 
-            if pdf_old:
-                pdf_name = reemplazar_pdf_existente(pdf_old, file_obj, numero, grupo_id)
-                if not pdf_name:
-                    invalidos += 1
-                    add_invalid_detail(invalid_details, display_name or filename, reason="no se pudo reemplazar el PDF")
-                    set_import_job(
-                        job_id,
-                        processed_rows=procesados,
-                        inserted=cargados,
-                        merged=reemplazados,
-                        ignored=no_encontrados,
-                        invalid=invalidos,
-                        invalid_details=invalid_details,
-                        detail=f"Cargados: {cargados} | Reemplazados: {reemplazados} | No encontrados: {no_encontrados} | Invalidos: {invalidos}",
-                    )
-                    continue
-                reemplazados += 1
-            else:
-                pdf_name = guardar_pdf(file_obj, numero, grupo_id)
-                cargados += 1
-
-            cur.execute(
-                "UPDATE archivos SET pdf_path = %s WHERE id = %s AND grupo_id = %s",
-                (pdf_name, archivo_id, grupo_id)
-            )
             ensure_rescans_table()
             cur.execute(
                 """
@@ -3733,7 +3822,10 @@ def archivos_legacy():
                       a.tipo_doc AS tipo_doc,
                       a.numero AS documento,
                       a.nombre AS nombre,
-                      a.pdf_path
+                      CASE WHEN NULLIF(a.pdf_path, '') IS NOT NULL OR EXISTS (
+                          SELECT 1 FROM archivo_pdfs p
+                          WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+                      ) THEN 1 ELSE 0 END AS pdf_path
                       FROM archivos a
                     JOIN cajas c ON c.id = a.caja_id
                     LEFT JOIN ranked r ON r.id = c.id
@@ -3757,7 +3849,10 @@ def archivos_legacy():
                       a.tipo_doc AS tipo_doc,
                       a.numero AS documento,
                       a.nombre AS nombre,
-                      a.pdf_path
+                      CASE WHEN NULLIF(a.pdf_path, '') IS NOT NULL OR EXISTS (
+                          SELECT 1 FROM archivo_pdfs p
+                          WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+                      ) THEN 1 ELSE 0 END AS pdf_path
                       FROM archivos a
                     JOIN cajas c ON c.id = a.caja_id
                     LEFT JOIN ranked r ON r.id = c.id
@@ -3787,7 +3882,10 @@ def archivos_legacy():
                   a.tipo_doc AS tipo_doc,
                   a.numero AS documento,
                   a.nombre AS nombre,
-                  a.pdf_path
+                  CASE WHEN NULLIF(a.pdf_path, '') IS NOT NULL OR EXISTS (
+                      SELECT 1 FROM archivo_pdfs p
+                      WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+                  ) THEN 1 ELSE 0 END AS pdf_path
                   FROM archivos a
                 JOIN cajas c ON c.id = a.caja_id
                 LEFT JOIN ranked r ON r.id = c.id
@@ -4217,12 +4315,13 @@ def archivo():
             in_clause, in_params = sqlserver_in_clause(selected_docs)
             cur.execute(
                 f"""
-                SELECT id, numero, nombre, pdf_path
-                FROM archivos
-                WHERE grupo_id = %s
-                  AND id IN {in_clause}
-                  AND pdf_path IS NOT NULL
-                ORDER BY numero
+                                SELECT p.id, a.numero, a.nombre, p.pdf_path,
+                                             p.fecha_documento, p.factura
+                                FROM archivo_pdfs p
+                                JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+                                WHERE p.grupo_id = %s
+                                    AND p.id IN {in_clause}
+                                ORDER BY p.fecha_documento DESC, p.factura DESC, p.id DESC
                 """,
                 (grupo_id, *in_params)
             )
@@ -4237,14 +4336,17 @@ def archivo():
             zip_buffer = BytesIO()
             agregados = 0
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for archivo_id, numero, nombre, pdf_path in rows:
+                for pdf_id, numero, nombre, pdf_path, fecha_documento, factura in rows:
                     abs_path = pdf_path
                     if not os.path.isabs(abs_path):
                         abs_path = os.path.join(app.config["UPLOAD_FOLDER"], abs_path)
                     if not os.path.exists(abs_path):
                         continue
                     safe_name = secure_filename(str(nombre or f"documento_{numero}")) or f"documento_{numero}"
-                    zip_file.write(abs_path, arcname=f"{numero}_{safe_name}_{archivo_id}.pdf")
+                    zip_file.write(
+                        abs_path,
+                        arcname=f"{numero}_{fecha_documento:%Y%m%d}_{factura}_{safe_name}_{pdf_id}.pdf"
+                    )
                     agregados += 1
 
             if not agregados:
@@ -4377,7 +4479,7 @@ def archivo():
             """, (caja_id, numero, nombre, grupo_id, session.get("usuario_id"), tipo_doc))
             archivo_id = cur.fetchone()[0]
 
-            # 3) PDF opcional: guardar y actualizar pdf_path
+            # 3) PDF opcional: guardar como documento independiente
             pdf_name = None
             file = request.files.get("pdf")
             if file and file.filename:
@@ -4387,11 +4489,17 @@ def archivo():
                     flash_error(407)
                     return redirect(url_for("archivo"))
 
-                pdf_name = guardar_pdf(file, numero, grupo_id)
-                cur.execute(
-                    "UPDATE archivos SET pdf_path = %s WHERE numero = %s AND grupo_id = %s",
-                    (pdf_name, numero, grupo_id)
-                )
+                try:
+                    _, pdf_name, _ = guardar_pdf_expediente(
+                        cur, file, archivo_id, grupo_id,
+                        session.get("usuario_id"), numero
+                    )
+                except ValueError as exc:
+                    conn.rollback()
+                    cur.close()
+                    conn.close()
+                    flash(str(exc), "error")
+                    return redirect(url_for("archivo"))
 
             conn.commit()
             cur.close()
@@ -4567,11 +4675,7 @@ def archivo():
                 flash_error(400)
                 return redirect(url_for("archivo"))
 
-            # checkbox para eliminar PDF actual / agregar PDF
             remove_pdf = request.form.get("remove_pdf") == "1"
-            append_pdf = request.form.get("append_pdf") == "1"
-            if append_pdf:
-                remove_pdf = False
 
             conn = get_db()
             cur = conn.cursor()
@@ -4607,6 +4711,10 @@ def archivo():
 
             # 1) eliminar PDF actual si se pidiÃ³
             if remove_pdf and pdf_old:
+                cur.execute(
+                    "DELETE FROM archivo_pdfs WHERE archivo_id = %s AND grupo_id = %s AND pdf_path = %s",
+                    (archivo_id, grupo_id, pdf_old)
+                )
                 try:
                     path = pdf_old
                     if not os.path.isabs(path):
@@ -4618,7 +4726,7 @@ def archivo():
 
                 pdf_name = None  # queda NULL en DB
 
-            # 2) subir PDF nuevo (reemplazo o agregar)
+            # 2) subir PDF nuevo como registro independiente
             file = request.files.get("pdf")
             if file and file.filename:
                 if not es_pdf(file):
@@ -4627,26 +4735,17 @@ def archivo():
                     flash_error(407)
                     return redirect(url_for("archivo"))
 
-                if append_pdf:
-                    pdf_name = unir_pdf_existente(pdf_old, file, numero_new, grupo_id)
-                    if not pdf_name:
-                        cur.close()
-                        conn.close()
-                        flash_error(423)
-                        return redirect(url_for("archivo"))
-                else:
-                    # si habÃ­a anterior y no se eliminÃ³ arriba, lo borramos
-                    if pdf_old and not remove_pdf:
-                        try:
-                            old_path = pdf_old
-                            if not os.path.isabs(old_path):
-                                old_path = os.path.join(app.root_path, old_path)
-                            if os.path.exists(old_path):
-                                os.remove(old_path)
-                        except Exception as e:
-                            print("Error eliminando PDF anterior:", e)
-
-                    pdf_name = guardar_pdf(file, numero_new, grupo_id)
+                try:
+                    guardar_pdf_expediente(
+                        cur, file, archivo_id, grupo_id,
+                        session.get("usuario_id"), numero_new
+                    )
+                except ValueError as exc:
+                    conn.rollback()
+                    cur.close()
+                    conn.close()
+                    flash(str(exc), "error")
+                    return redirect(url_for("archivo"))
 
             # 3) update final
             cur.execute("""
@@ -4654,6 +4753,10 @@ def archivo():
                 SET numero = %s, nombre = %s, caja_id = %s, pdf_path = %s, tipo_doc = %s
                 WHERE numero = %s AND grupo_id = %s
             """, (numero_new, nombre_new, caja_dest_id, pdf_name, tipo_doc_new, numero_old, grupo_id))
+            cur.execute(
+                "UPDATE archivo_pdfs SET numero_documento = %s WHERE archivo_id = %s AND grupo_id = %s",
+                (numero_new, archivo_id, grupo_id)
+            )
 
             if file and file.filename:
                 ensure_rescans_table()
@@ -4739,7 +4842,10 @@ def archivo():
                     a.tipo_doc AS tipo_doc,
                     a.numero AS documento,
                     a.nombre AS nombre,
-                    a.pdf_path
+                    CASE WHEN NULLIF(a.pdf_path, '') IS NOT NULL OR EXISTS (
+                        SELECT 1 FROM archivo_pdfs p
+                        WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+                    ) THEN 1 ELSE 0 END AS pdf_path
                     FROM archivos a
                         JOIN cajas c ON c.id = a.caja_id
                         LEFT JOIN ranked r ON r.id = c.id
@@ -4763,7 +4869,10 @@ def archivo():
                     a.tipo_doc AS tipo_doc,
                     a.numero AS documento,
                     a.nombre AS nombre,
-                    a.pdf_path
+                    CASE WHEN NULLIF(a.pdf_path, '') IS NOT NULL OR EXISTS (
+                        SELECT 1 FROM archivo_pdfs p
+                        WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+                    ) THEN 1 ELSE 0 END AS pdf_path
                     FROM archivos a
                         JOIN cajas c ON c.id = a.caja_id
                         LEFT JOIN ranked r ON r.id = c.id
@@ -4793,7 +4902,10 @@ def archivo():
                 a.tipo_doc AS tipo_doc,
                 a.numero AS documento,
                 a.nombre AS nombre,
-                a.pdf_path
+                CASE WHEN NULLIF(a.pdf_path, '') IS NOT NULL OR EXISTS (
+                    SELECT 1 FROM archivo_pdfs p
+                    WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+                ) THEN 1 ELSE 0 END AS pdf_path
                 FROM archivos a
                     JOIN cajas c ON c.id = a.caja_id
                     LEFT JOIN ranked r ON r.id = c.id
@@ -4847,11 +4959,12 @@ def archivo():
 
     cur.execute(
         """
-        SELECT a.id, a.caja_id, a.numero, a.nombre, a.tipo_doc
-        FROM archivos a
-        WHERE a.grupo_id = %s
-          AND a.pdf_path IS NOT NULL
-        ORDER BY a.caja_id, a.numero, a.id
+                SELECT p.id, a.caja_id, a.numero, a.nombre, a.tipo_doc,
+                             p.fecha_documento, p.factura
+                FROM archivo_pdfs p
+                JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+                WHERE p.grupo_id = %s
+                ORDER BY a.caja_id, p.fecha_documento DESC, p.factura DESC, p.id DESC
         """,
         (grupo_id,)
     )
@@ -4862,12 +4975,14 @@ def archivo():
     pdf_bulk_data = []
     excel_box_data = []
     docs_by_box = {}
-    for archivo_id, caja_id, numero, nombre, tipo_doc in pdf_rows:
+    for pdf_id, caja_id, numero, nombre, tipo_doc, fecha_documento, factura in pdf_rows:
         docs_by_box.setdefault(caja_id, []).append({
-            "id": archivo_id,
+            "id": pdf_id,
             "numero": numero,
             "nombre": nombre,
             "tipo_doc": tipo_doc,
+            "fecha": fecha_documento.isoformat(),
+            "factura": factura,
         })
 
     for caja in cajas:
@@ -5243,9 +5358,6 @@ def archivo_caja(caja_id):
                 return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             remove_pdf = request.form.get("remove_pdf") == "1"
-            append_pdf = request.form.get("append_pdf") == "1"
-            if append_pdf:
-                remove_pdf = False
             file = request.files.get("pdf")
 
             conn = get_db()
@@ -5269,6 +5381,10 @@ def archivo_caja(caja_id):
 
             # ðŸ—‘ï¸ Eliminar PDF actual
             if remove_pdf and pdf_old:
+                cur.execute(
+                    "DELETE FROM archivo_pdfs WHERE archivo_id = %s AND grupo_id = %s AND pdf_path = %s",
+                    (archivo_id, grupo_id, pdf_old)
+                )
                 try:
                     path = pdf_old
                     if not os.path.isabs(path):
@@ -5280,7 +5396,7 @@ def archivo_caja(caja_id):
 
                 pdf_name = None
 
-            # ðŸ“„ Reemplazar / agregar PDF
+            # ðŸ“„ Agregar PDF como registro independiente
             if file and file.filename:
                 if not es_pdf(file):
                     cur.close()
@@ -5288,26 +5404,17 @@ def archivo_caja(caja_id):
                     flash_error(407)
                     return redirect(url_for("archivo_caja", caja_id=caja_id))
 
-                if append_pdf:
-                    pdf_name = unir_pdf_existente(pdf_old, file, numero_new, grupo_id)
-                    if not pdf_name:
-                        cur.close()
-                        conn.close()
-                        flash_error(423)
-                        return redirect(url_for("archivo_caja", caja_id=caja_id))
-                else:
-                    # borrar anterior si existÃ­a
-                    if pdf_old and not remove_pdf:
-                        try:
-                            old_path = pdf_old
-                            if not os.path.isabs(old_path):
-                                old_path = os.path.join(app.root_path, old_path)
-                            if os.path.exists(old_path):
-                                os.remove(old_path)
-                        except Exception as e:
-                            print("Error eliminando PDF anterior:", e)
-
-                    pdf_name = guardar_pdf(file, numero_new, grupo_id)
+                try:
+                    guardar_pdf_expediente(
+                        cur, file, archivo_id, grupo_id,
+                        session.get("usuario_id"), numero_new
+                    )
+                except ValueError as exc:
+                    conn.rollback()
+                    cur.close()
+                    conn.close()
+                    flash(str(exc), "error")
+                    return redirect(url_for("archivo_caja", caja_id=caja_id))
 
             # Update final
             cur.execute("""
@@ -5318,6 +5425,10 @@ def archivo_caja(caja_id):
                     tipo_doc = %s
                 WHERE numero = %s AND grupo_id = %s
             """, (numero_new, nombre_new, pdf_name, tipo_doc_new, numero_old, grupo_id))
+            cur.execute(
+                "UPDATE archivo_pdfs SET numero_documento = %s WHERE archivo_id = %s AND grupo_id = %s",
+                (numero_new, archivo_id, grupo_id)
+            )
 
             if file and file.filename:
                 ensure_rescans_table()
@@ -5396,9 +5507,13 @@ def archivo_caja(caja_id):
         flash_error(350)
         return redirect(url_for("archivo"))
 
-    # archivos de la caja (incluye pdf_path para habilitar Ver PDF)
+    # archivos de la caja (incluye si existe al menos un PDF)
     cur.execute("""
-        SELECT a.numero, a.tipo_doc, a.nombre, a.pdf_path
+        SELECT a.numero, a.tipo_doc, a.nombre,
+               CASE WHEN NULLIF(a.pdf_path, '') IS NOT NULL OR EXISTS (
+                   SELECT 1 FROM archivo_pdfs p
+                   WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+               ) THEN 1 ELSE 0 END AS tiene_pdf
         FROM archivos a
         WHERE a.caja_id = %s AND a.grupo_id = %s
         ORDER BY a.numero
@@ -6199,7 +6314,10 @@ def export_excel():
             CASE WHEN c.is_pendiente = 1 THEN 0 ELSE r.caja_visible END AS caja_num,
             a.numero,
             a.nombre,
-            CASE WHEN a.pdf_path IS NULL OR a.pdf_path = '' THEN 'No' ELSE 'Si' END AS pdf
+            CASE WHEN EXISTS (
+                SELECT 1 FROM archivo_pdfs p
+                WHERE p.archivo_id = a.id AND p.grupo_id = a.grupo_id
+            ) THEN 'Si' ELSE 'No' END AS pdf
         FROM archivos a
         JOIN cajas c ON c.id = a.caja_id
         LEFT JOIN ranked r ON r.id = c.id
@@ -6294,8 +6412,40 @@ def export_excel():
 
 # PDF
 
-@app.route("/pdf/<int:numero>")
-def ver_pdf(numero):
+@app.route("/archivo/<int:numero>/pdfs")
+def listar_pdfs_expediente(numero):
+    if not login_requerido():
+        return jsonify({"error": "Debes iniciar sesion para continuar."}), 401
+
+    grupo_id = obtener_grupo_id()
+    if not grupo_id:
+        return jsonify({"error": error_text(206)}), 403
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT p.id, p.fecha_documento, p.factura
+        FROM archivo_pdfs p
+        JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+        WHERE p.numero_documento = %s AND p.grupo_id = %s
+        ORDER BY p.fecha_documento DESC, p.factura DESC, p.id DESC
+        """,
+        (numero, grupo_id),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify({
+        "pdfs": [
+            {"id": row[0], "fecha": row[1].isoformat(), "factura": row[2]}
+            for row in rows
+        ]
+    })
+
+
+@app.route("/pdf/<int:pdf_id>")
+def ver_pdf(pdf_id):
     if not login_requerido():
         return redirect(url_for("login"))
 
@@ -6306,8 +6456,13 @@ def ver_pdf(numero):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "SELECT pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
-        (numero, grupo_id)
+        """
+        SELECT p.pdf_path
+        FROM archivo_pdfs p
+        JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+        WHERE p.id = %s AND p.grupo_id = %s
+        """,
+        (pdf_id, grupo_id)
     )
     row = cur.fetchone()
     cur.close()
@@ -6326,8 +6481,8 @@ def ver_pdf(numero):
     return send_file(path, as_attachment=False, mimetype="application/pdf")
 
 
-@app.route("/pdf/<int:numero>/pages")
-def ver_pdf_paginas(numero):
+@app.route("/pdf/<int:pdf_id>/pages")
+def ver_pdf_paginas(pdf_id):
     if not login_requerido():
         return redirect(url_for("login"))
 
@@ -6352,8 +6507,13 @@ def ver_pdf_paginas(numero):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "SELECT pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
-        (numero, grupo_id)
+        """
+        SELECT p.pdf_path
+        FROM archivo_pdfs p
+        JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+        WHERE p.id = %s AND p.grupo_id = %s
+        """,
+        (pdf_id, grupo_id)
     )
     row = cur.fetchone()
     cur.close()
@@ -6385,13 +6545,13 @@ def ver_pdf_paginas(numero):
     return send_file(
         output,
         as_attachment=download,
-        download_name=f"doc_{numero}_seleccion.pdf",
+        download_name=f"pdf_{pdf_id}_seleccion.pdf",
         mimetype="application/pdf"
     )
 
 
-@app.route("/pdf/<int:numero>/pages/delete", methods=["POST"])
-def eliminar_paginas_pdf(numero):
+@app.route("/pdf/<int:pdf_id>/pages/delete", methods=["POST"])
+def eliminar_paginas_pdf(pdf_id):
     if not login_requerido():
         return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
 
@@ -6419,8 +6579,13 @@ def eliminar_paginas_pdf(numero):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
-        (numero, grupo_id)
+        """
+        SELECT a.id, a.numero, a.nombre, p.pdf_path
+        FROM archivo_pdfs p
+        JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+        WHERE p.id = %s AND p.grupo_id = %s
+        """,
+        (pdf_id, grupo_id)
     )
     row = cur.fetchone()
     cur.close()
@@ -6429,7 +6594,7 @@ def eliminar_paginas_pdf(numero):
     if not row or not row[2]:
         return jsonify({"ok": False, "error": error_text(420)}), 404
 
-    archivo_id, nombre_doc, filename = row
+    archivo_id, numero, nombre_doc, filename = row
     path = filename if os.path.isabs(filename) else os.path.join(app.config["UPLOAD_FOLDER"], filename)
     if not os.path.exists(path):
         return jsonify({"ok": False, "error": error_text(421)}), 404
@@ -6502,8 +6667,8 @@ def eliminar_paginas_pdf(numero):
         return jsonify({"ok": False, "error": error_text(904, fallback="No se pudieron eliminar las paginas seleccionadas.")}), 500
 
 
-@app.route("/pdf/<int:numero>/pages/reorder", methods=["POST"])
-def reordenar_paginas_pdf(numero):
+@app.route("/pdf/<int:pdf_id>/pages/reorder", methods=["POST"])
+def reordenar_paginas_pdf(pdf_id):
     if not login_requerido():
         return jsonify({"ok": False, "error": "Debes iniciar sesion para continuar."}), 401
 
@@ -6524,8 +6689,13 @@ def reordenar_paginas_pdf(numero):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, nombre, pdf_path FROM archivos WHERE numero = %s AND grupo_id = %s",
-        (numero, grupo_id)
+        """
+        SELECT a.id, a.numero, a.nombre, p.pdf_path
+        FROM archivo_pdfs p
+        JOIN archivos a ON a.id = p.archivo_id AND a.grupo_id = p.grupo_id
+        WHERE p.id = %s AND p.grupo_id = %s
+        """,
+        (pdf_id, grupo_id)
     )
     row = cur.fetchone()
     cur.close()
@@ -6534,7 +6704,7 @@ def reordenar_paginas_pdf(numero):
     if not row or not row[2]:
         return jsonify({"ok": False, "error": error_text(420)}), 404
 
-    archivo_id, nombre_doc, filename = row
+    archivo_id, numero, nombre_doc, filename = row
     path = filename if os.path.isabs(filename) else os.path.join(app.config["UPLOAD_FOLDER"], filename)
     if not os.path.exists(path):
         return jsonify({"ok": False, "error": error_text(421)}), 404

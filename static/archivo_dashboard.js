@@ -807,8 +807,8 @@ function renderBulkPdfDocs() {
       return `
         <label class="bulk-doc-item">
           <div class="bulk-doc-copy">
-            <strong>${formatMiles(doc.numero)}${doc.tipo_doc ? " · " + doc.tipo_doc : ""}</strong>
-            <span>${String(doc.nombre || "").toUpperCase()}</span>
+            <strong>${doc.factura} · ${String(doc.fecha || "").split("-").reverse().join("/")}</strong>
+            <span>${formatMiles(doc.numero)}${doc.tipo_doc ? " · " + doc.tipo_doc : ""} · ${String(doc.nombre || "").toUpperCase()}</span>
           </div>
           <input type="checkbox" ${checked} onchange="toggleBulkDoc('${doc.id}', this.checked)">
         </label>

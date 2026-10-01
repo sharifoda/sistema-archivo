@@ -298,27 +298,6 @@
     <label style="display:block; margin-top:14px;">Motivo de reescaneo (opcional)</label>
     <input type="text" name="motivo" id="archivo_motivo_reescaneo" placeholder="Ej. faltan hojas, escaneo incompleto">
 
-    <div class="pdf-options-block" id="archivoPdfOptions">
-      <p class="pdf-options-title">Opciones del PDF</p>
-      <p class="pdf-options-sub">Como este documento ya tiene un PDF guardado, puedes unir el nuevo archivo o eliminar el actual.</p>
-
-      <label class="pdf-option-row" for="append_pdf">
-        <div class="pdf-option-copy">
-          <strong>Añadir PDF</strong>
-          <span>Une el PDF nuevo con el PDF que ya está guardado en el sistema.</span>
-        </div>
-        <input type="checkbox" name="append_pdf" id="append_pdf" value="1">
-      </label>
-
-      <label class="pdf-option-row danger" for="remove_pdf">
-        <div class="pdf-option-copy">
-          <strong>Eliminar PDF actual</strong>
-          <span>Borra el PDF guardado. Úsalo si quieres dejar el documento sin archivo o reemplazarlo por otro.</span>
-        </div>
-        <input type="checkbox" name="remove_pdf" id="remove_pdf" value="1">
-      </label>
-    </div>
-
     <div class="actions">
       <button class="btn" type="button" onclick="cerrarModalArchivo()">Cancelar</button>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">

@@ -86,7 +86,10 @@
   </div>
 
   <div class="pdf-modal-body">
-    <div class="pdf-thumbs" id="pdfThumbs"></div>
+    <div class="pdf-modal-side">
+      <div class="pdf-document-list" id="pdfDocumentList"></div>
+      <div class="pdf-thumbs" id="pdfThumbs"></div>
+    </div>
     <div class="pdf-preview">
       <canvas id="pdfPreviewCanvas"></canvas>
     </div>
@@ -112,10 +115,11 @@
 </div>
 
 <div id="pdf-modal-data"
-     data-url-base="{{ url_for('ver_pdf', numero=0) }}"
-     data-url-pages="{{ url_for('ver_pdf_paginas', numero=0) }}"
-     data-url-delete-pages="{{ url_for('eliminar_paginas_pdf', numero=0) }}"
-     data-url-reorder-pages="{{ url_for('reordenar_paginas_pdf', numero=0) }}"
+  data-url-list-base="{{ url_for('listar_pdfs_expediente', numero=0) }}"
+  data-url-base="{{ url_for('ver_pdf', pdf_id=0) }}"
+  data-url-pages="{{ url_for('ver_pdf_paginas', pdf_id=0) }}"
+  data-url-delete-pages="{{ url_for('eliminar_paginas_pdf', pdf_id=0) }}"
+  data-url-reorder-pages="{{ url_for('reordenar_paginas_pdf', pdf_id=0) }}"
      data-csrf-token="{{ csrf_token() }}"
      data-can-delete-pages="{{ '1' if puede_editar_pdf_actual else '0' }}">
 </div>

@@ -848,27 +848,6 @@
     <label style="display:block; margin-top:14px;">Motivo de reescaneo (opcional)</label><br>
     <input type="text" name="motivo" id="editar_motivo_reescaneo" placeholder="Ej. faltan hojas, historia incompleta"><br>
 
-    <div class="pdf-options-block" id="editarPdfOptions">
-      <p class="pdf-options-title">Opciones del PDF</p>
-      <p class="pdf-options-sub">Si el documento ya tiene un PDF, puedes unir uno nuevo o quitar el actual.</p>
-
-      <label class="pdf-option-row" for="editar_append_pdf">
-        <div class="pdf-option-copy">
-          <strong>Añadir PDF</strong>
-          <span>Une el PDF nuevo con el archivo ya guardado.</span>
-        </div>
-        <input type="checkbox" name="append_pdf" id="editar_append_pdf" value="1">
-      </label>
-
-      <label class="pdf-option-row danger" for="editar_remove_pdf">
-        <div class="pdf-option-copy">
-          <strong>Eliminar PDF actual</strong>
-          <span>Borra el PDF existente antes de guardar los cambios.</span>
-        </div>
-        <input type="checkbox" name="remove_pdf" id="editar_remove_pdf" value="1">
-      </label>
-    </div>
-
     <div class="actions">
       <button type="button" class="btn" onclick="cerrarModal('Editar')">Cancelar</button>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
@@ -885,7 +864,7 @@
 <div id="server-data"
      data-json='{{ {
        "urlCajaBase": url_for("archivo_caja", caja_id=0),
-       "urlPdfBase":  url_for("ver_pdf", numero=0),
+      "urlPdfBase":  url_for("ver_pdf", pdf_id=0),
        "importStatusUrl": import_status_url,
        "importReportUrlBase": import_report_url_base,
        "importCloseUrl": url_for("importacion_cerrar"),
